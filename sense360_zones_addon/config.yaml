@@ -1,0 +1,30 @@
+name: "Sense360 Zones"
+slug: sense360_zones
+version: "0.1.0"
+description: "Sense360 Zones editor (Ingress, HA-native auth, non-destructive saves)"
+url: "https://github.com/sense360store/sense360zones"
+
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:radar
+
+homeassistant_api: true
+
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "Sense360 Zones web UI (standalone mode)"
+
+image: "ghcr.io/sense360store/sense360zones-{arch}"
+
+options:
+  log_level: info
+schema:
+  log_level: list(trace|debug|info|warning|error|critical)

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  lint-addon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Home Assistant add-on
+        uses: frenck/action-addon-linter@v2
+
+  test-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test build (multi-arch)
+        uses: home-assistant/builder@2025.11.0
+        with:
+          args: |
+            --test
+            --all
+            --target sense360_zones_addon
+            --addon
