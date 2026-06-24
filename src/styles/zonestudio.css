@@ -1,0 +1,83 @@
+/*
+ * Zone Studio theme tokens, scrollbar styling and keyframes.
+ * Ported verbatim from the Claude Design `Zone Studio.dc.html` <helmet> block
+ * so the visual output matches the prototype exactly.
+ */
+.zs {
+  --bg: #e9edf1;
+  --canvas: #eef2f6;
+  --panel: #ffffff;
+  --ins: #f3f6f9;
+  --bd: #e2e8ee;
+  --bd2: #eef2f6;
+  --tx: #1a2430;
+  --mut: #67737f;
+  --faint: #9aa7b3;
+  --grid: #dbe2e9;
+  --ring: #cfd8e1;
+  --green: #00bf63;
+  --greenSoft: rgba(0, 191, 99, 0.13);
+  --greenLine: #00a857;
+  --excl: #e8513a;
+  --exclSoft: rgba(232, 81, 58, 0.1);
+  --band: #6f57ff;
+  --bandSoft: rgba(111, 87, 255, 0.12);
+  --bandLine: #6f57ff;
+  --shadow: 0 1px 3px rgba(20, 30, 45, 0.07), 0 8px 28px rgba(20, 30, 45, 0.05);
+}
+
+.zs.dark {
+  --bg: #080b0f;
+  --canvas: #0a0e13;
+  --panel: #0c1117;
+  --ins: #0e151d;
+  --bd: #1a232d;
+  --bd2: #141d26;
+  --tx: #cdd6e0;
+  --mut: #8b97a4;
+  --faint: #5f6b76;
+  --grid: #15202a;
+  --ring: #1e2c34;
+  --green: #00d06d;
+  --greenSoft: rgba(0, 208, 109, 0.15);
+  --greenLine: #00d06d;
+  --excl: #ff6a4d;
+  --exclSoft: rgba(255, 106, 77, 0.13);
+  --band: #9b87ff;
+  --bandSoft: rgba(155, 135, 255, 0.15);
+  --bandLine: #9b87ff;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.zs ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.zs ::-webkit-scrollbar-thumb {
+  background: var(--ring);
+  border-radius: 5px;
+}
+.zs ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pulsedot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes blip {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
