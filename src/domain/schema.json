@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sense360.dev/schemas/zone-studio/v1.json",
+  "title": "Sense360 Zone Studio configuration",
+  "description": "Canonical persisted model for Zone Studio. Mirrors src/domain/types.ts — keep the two in sync. Lengths/positions are metres in room coordinates; angles are degrees.",
+  "type": "object",
+  "required": ["schemaVersion", "rooms"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "rooms": { "type": "array", "items": { "$ref": "#/$defs/Room" } }
+  },
+  "$defs": {
+    "Point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "SensorMount": {
+      "type": "object",
+      "required": ["surface", "height", "origin", "boresight"],
+      "additionalProperties": false,
+      "properties": {
+        "surface": { "enum": ["wall", "ceiling"] },
+        "height": { "type": "number", "description": "Height above floor, metres." },
+        "origin": { "$ref": "#/$defs/Point" },
+        "boresight": { "type": "number", "description": "Facing direction, degrees; 0 = along +y." }
+      }
+    },
+    "RectZone": {
+      "type": "object",
+      "required": ["id", "name", "type", "shape", "cx", "cy", "w", "h", "rot"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["detection", "exclusion"] },
+        "shape": { "const": "rect" },
+        "cx": { "type": "number" },
+        "cy": { "type": "number" },
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "h": { "type": "number", "exclusiveMinimum": 0 },
+        "rot": { "type": "number", "description": "Rotation, degrees; 0 = axis-aligned." }
+      }
+    },
+    "PolyZone": {
+      "type": "object",
+      "required": ["id", "name", "type", "shape", "pts"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["detection", "exclusion"] },
+        "shape": { "const": "poly" },
+        "pts": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/Point" } }
+      }
+    },
+    "Zone": {
+      "oneOf": [{ "$ref": "#/$defs/RectZone" }, { "$ref": "#/$defs/PolyZone" }]
+    },
+    "BandConfig": {
+      "type": "object",
+      "required": ["minR", "maxR", "beam", "trigSens", "sustSens", "reducedRange"],
+      "additionalProperties": false,
+      "properties": {
+        "minR": { "type": "number", "minimum": 0 },
+        "maxR": { "type": "number", "minimum": 0 },
+        "beam": { "type": "number", "description": "Beam width, degrees." },
+        "trigSens": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "sustSens": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "reducedRange": { "type": "number", "minimum": 0 }
+      }
+    },
+    "Ld2450Sensor": {
+      "type": "object",
+      "required": ["id", "name", "mount", "kind", "fovHalf", "range", "zones"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mount": { "$ref": "#/$defs/SensorMount" },
+        "kind": { "const": "ld2450" },
+        "fovHalf": { "type": "number", "description": "Field-of-view half-angle, degrees." },
+        "range": { "type": "number", "description": "Maximum range, metres." },
+        "zones": { "type": "array", "items": { "$ref": "#/$defs/Zone" } }
+      }
+    },
+    "Sen0609Sensor": {
+      "type": "object",
+      "required": ["id", "name", "mount", "kind", "band"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mount": { "$ref": "#/$defs/SensorMount" },
+        "kind": { "const": "sen0609" },
+        "band": { "$ref": "#/$defs/BandConfig" }
+      }
+    },
+    "Sensor": {
+      "oneOf": [{ "$ref": "#/$defs/Ld2450Sensor" }, { "$ref": "#/$defs/Sen0609Sensor" }]
+    },
+    "Device": {
+      "type": "object",
+      "required": ["id", "name", "sensors"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "sensors": { "type": "array", "items": { "$ref": "#/$defs/Sensor" } }
+      }
+    },
+    "Room": {
+      "type": "object",
+      "required": ["id", "name", "devices"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "devices": { "type": "array", "items": { "$ref": "#/$defs/Device" } }
+      }
+    }
+  }
+}
