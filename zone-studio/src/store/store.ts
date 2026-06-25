@@ -99,6 +99,31 @@ export class ZoneStudioStore {
     this.unsub = client.streamTargets(seed.activeDeviceId, (targets) => this.set({ targets }))
   }
 
+  /**
+   * Replace the bootstrap state with data loaded from the backend.
+   *
+   * The HTTP client cannot seed synchronously the way the mock did, so
+   * `instance.ts` constructs the store with a first-paint seed and then calls
+   * this once `discover()` + `readConfig()` resolve. It only re-subscribes the
+   * target stream when the active device actually changes, so the common case
+   * (same device) does not drop the live WebSocket.
+   */
+  hydrate(seed: Seed) {
+    const sameDevice = seed.activeDeviceId === this.state.activeDeviceId
+    if (!sameDevice) this.unsub()
+    this.set({
+      rooms: seed.rooms,
+      activeRoomId: seed.activeRoomId,
+      activeDeviceId: seed.activeDeviceId,
+      zones: seed.zones,
+      band: seed.band,
+      saved: snapshot(seed.zones, seed.band),
+    })
+    if (!sameDevice) {
+      this.unsub = this.client.streamTargets(seed.activeDeviceId, (targets) => this.set({ targets }))
+    }
+  }
+
   // ---- store plumbing ----------------------------------------------------
   getState = (): EditorState => this.state
   subscribe = (l: Listener): Unsubscribe => {
