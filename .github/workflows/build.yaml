@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull request: build all architectures without pushing, for validation.
+      - name: Build only (pull request)
+        if: github.event_name == 'pull_request'
+        uses: home-assistant/builder@2026.02.1
+        with:
+          args: |
+            --test \
+            --all \
+            --target zone-studio \
+            --docker-hub ghcr.io/sense360store
+
+      # Release or version tag: build and push the multi-arch images to GHCR.
+      - name: Build and push (release)
+        if: github.event_name != 'pull_request'
+        uses: home-assistant/builder@2026.02.1
+        with:
+          args: |
+            --all \
+            --target zone-studio \
+            --docker-hub ghcr.io/sense360store

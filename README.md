@@ -1,116 +1,93 @@
-# Sense360 Zone Studio
+# Sense360 Add-ons
 
-An interactive radar/sensor **zone-configuration studio** for Sense360 rooms.
-Lay out detection and exclusion zones over a live radar canvas, tune sensor
-range bands, and watch tracked targets move in real time.
+A Home Assistant add-on repository for Sense360. It currently contains one
+add-on, **Sense360 Zone Studio**, in [`zone-studio/`](./zone-studio).
 
-This is a faithful React implementation of the Claude Design prototype
-`Zone Studio.dc.html`.
+## Add this repository to Home Assistant
 
-## Features
+In Home Assistant, open Settings then Add-ons, open the Add-on Store, and from
+the overflow menu choose Repositories. Add:
 
-- **Two sensor layers**
-  - **HLK LD2450** — spatial X/Y tracking (120° FoV, up to 3 targets). Owns the
-    drawable detection/exclusion zones.
-  - **DFRobot SEN0609 (C4001)** — radial range band (single distance +
-    presence). Tunable inner/outer radius, beam width, and sensitivity.
-- **Canvas** — range rings, radial spokes, sensor field-of-view, live animated
-  targets with motion trails, and a 0.5 m snapping grid.
-- **Drawing tools** — Select, Rectangle, Rotated rectangle, and Polygon. Draw,
-  move, resize (corner handles), rotate, and reshape (vertex handles) directly
-  on the canvas.
-- **Wall / Ceiling views** — switch between a wall-mounted cross-section and a
-  ceiling-mounted top-down footprint; geometry re-projects accordingly.
-- **Context properties panel** — edit the selected zone (name, type, geometry,
-  rotation, live occupancy) or sensor settings.
-- **Light / Dark themes**, plus dirty-state tracking with **Apply** / **Revert**.
+```
+https://github.com/sense360store/sense360zones
+```
 
-## Tech stack
+Sense360 Zone Studio then appears in the store. Install it, start it, and open it
+from the sidebar.
 
-- [React 18](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- [Vite](https://vite.dev/) for dev server and bundling
-- SVG canvas with pointer-event interaction; no other runtime dependencies
+## Sense360 Zone Studio
 
-## Getting started
+An interactive radar and sensor zone configuration studio for Sense360 rooms. Lay
+out detection and exclusion zones over a live canvas, tune sensor range bands, and
+watch tracked targets move. It supports the HLK LD2450 (spatial X/Y tracking, owns
+the drawable zones) and the DFRobot SEN0609 / C4001 (radial range band).
+
+This is the Phase 1 add-on shell. The data is still simulated, but it now flows
+through the real architecture: the frontend talks to a backend over HTTP and a
+WebSocket, the app is packaged as an installable add-on, and a multi architecture
+image is built in CI. A later phase replaces only the backend's data provider with
+a real Home Assistant connection. See [ROADMAP.md](./ROADMAP.md) and
+[DECISIONS.md](./DECISIONS.md).
+
+User facing documentation is in [`zone-studio/DOCS.md`](./zone-studio/DOCS.md).
+
+## Architecture
+
+The frontend and the backend meet at a single, stable client contract, so the
+running app cannot tell a mock from a real backend.
+
+- **`zone-studio/src/domain/`** — the canonical data model (`types.ts` plus a
+  matching `schema.json`) and pure logic: geometry and the NATIVE/POLYGON profile
+  resolver. Everything is SI units (metres, degrees) in room coordinates.
+- **`zone-studio/src/client/`** — the `ZonesClient` seam: discover, read and write
+  config, and stream live targets. `HttpZonesClient` is the live implementation
+  (HTTP plus WebSocket, ingress relative URLs); `MockZonesClient` stays for tests
+  and offline development.
+- **`zone-studio/src/store/`** — a small typed store consumed via
+  `useSyncExternalStore`. `store/instance.ts` is the single composition root that
+  wires the client to the store.
+- **`zone-studio/src/canvas/` and `zone-studio/src/panels/`** — the SVG canvas,
+  projection math, toolbar, and side panels. `ZoneStudio.tsx` is layout only.
+- **`zone-studio/server/`** — a Fastify backend that serves the built SPA and
+  exposes the same contract. A server side `DataProvider` interface has a
+  `MockDataProvider` that owns the simulation; a later phase adds an
+  `HaDataProvider` and changes only the provider selection.
+
+### Ingress
+
+Home Assistant serves the add-on under `/api/hassio_ingress/<token>/`. The build
+uses relative asset URLs (`base: './'`) and the client builds every API and
+WebSocket URL from the document's own path, so the browser carries the ingress
+prefix and the add-on never emits an absolute, prefix less path. The server only
+admits the Supervisor ingress peer in production.
+
+## Development
+
+All development happens inside `zone-studio/`.
 
 ```bash
-npm install
-npm run dev      # start the dev server (http://localhost:5173)
+cd zone-studio
+npm ci
+npm run dev        # Vite on :5173 and the backend on :8099, proxied together
 ```
 
 Other scripts:
 
 ```bash
-npm run build      # type-check (tsc) + production build to dist/
-npm run preview    # preview the production build
-npm run typecheck  # type-check only
+npm run build        # typecheck, build the SPA, bundle the server
+npm run typecheck    # type-check the frontend and the server
+npm test             # unit and integration tests (Vitest)
+npm run lint         # ESLint
+npm run start        # run the bundled server (after build)
 ```
 
-## Project structure
+To build and run the add-on image locally:
 
-```
-index.html               # entry; loads Murecho + JetBrains Mono fonts
-DECISIONS.md             # locked architecture decisions (roadmap §3)
-src/
-  main.tsx               # React entry point
-  ZoneStudio.tsx         # app shell: lays the panels around the canvas
-  domain/                # canonical data model + pure logic
-    types.ts             #   TypeScript model (Room/Device/Sensor/Zone/…)
-    schema.json          #   matching JSON Schema (persistence contract)
-    geometry.ts          #   pure zone geometry (rect corners, point-in-poly, …)
-    profile.ts           #   NATIVE vs POLYGON profile resolution
-    constants.ts         #   physical sensor facts (FoV, range)
-  client/                # the integration seam
-    ZonesClient.ts       #   interface: discover / read / write / stream targets
-    MockZonesClient.ts   #   mock data + live-target simulation (Phase 0)
-  store/                 # small typed store
-    store.ts             #   state + actions + drag interaction
-    instance.ts          #   composition root (wires client → store)
-    hooks.ts             #   useEditorState() binding
-  canvas/                # the SVG canvas
-    Canvas.tsx           #   range rings, FoV, band, zones, targets, trails
-    CanvasToolbar.tsx    #   view + tool selectors, cursor readout
-    projection.ts        #   metre ↔ pixel projection per view
-    constants.ts         #   viewbox / scale display constants
-  panels/                # side panels
-    TopBar.tsx           #   logo, room status, theme, apply/revert
-    LeftPanel.tsx        #   layers + zone list
-    Inspector.tsx        #   right context panel (routes by selection)
-    ZonePanel.tsx        #   zone editor (geometry, type)
-    BandPanel.tsx        #   SEN0609 radial band editor
-    LdPanel.tsx          #   LD2450 sensor / live targets
-  components/Field.tsx   # controlled-on-commit input
-  index.css              # global reset + full-viewport sizing
-  styles/zonestudio.css  # theme tokens (light/dark), scrollbars, keyframes
-  lib/css.ts             # inline CSS-string → React style-object helper
+```bash
+cd zone-studio
+docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 -t zone-studio .
+docker run --rm -e ALLOW_ALL_ORIGINS=1 -p 8099:8099 zone-studio
+# then open http://localhost:8099
 ```
 
-## Architecture
-
-PR #4 delivered the prototype as one ~1500-line class component. Phase 0 (see
-[DECISIONS.md](./DECISIONS.md)) split it into layers without any user-visible
-change, so later phases (backend, Home Assistant connection, real apply path)
-have a stable contract to build on:
-
-- **`domain/`** — the canonical data model (`types.ts` + matching `schema.json`)
-  plus pure, dependency-free logic: geometry (copied verbatim, keeping the canvas
-  pixel-identical) and the NATIVE/POLYGON profile resolver.
-- **`client/`** — the `ZonesClient` seam (discover / read / write / stream
-  targets). Phase 0 ships only `MockZonesClient`, which owns all of today's
-  simulated data and the live-target animation. A real backend swaps in here
-  without the UI changing.
-- **`store/`** — a small typed store (state + actions + drag interaction),
-  consumed via `useSyncExternalStore`; no new runtime dependencies.
-- **`canvas/` + `panels/`** — the SVG canvas and side panels. Inline style strings
-  from the prototype are still fed through `lib/css.ts` rather than
-  hand-translated, to avoid visual drift.
-
-Intentional, behaviour-preserving choices:
-
-- The root frame fills the viewport (the prototype hard-coded 1440×900). At that
-  resolution the layout is identical; the flex layout and SVG `viewBox` scale
-  gracefully at other sizes.
-- Text and number fields commit on blur / Enter (matching the prototype's native
-  `change` semantics) while range sliders update live.
-- The header (“Living Room · 2 sensors”) is derived from the room/device model,
-  not hardcoded, so multi-room is a later UI addition rather than a schema change.
+`ALLOW_ALL_ORIGINS=1` disables the ingress peer guard for local use only.

@@ -1,0 +1,15 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# Start the Sense360 Zone Studio server
+# ==============================================================================
+declare log_level
+log_level=$(bashio::config 'log_level')
+
+bashio::log.info "Starting Sense360 Zone Studio on 0.0.0.0:8099 (log_level=${log_level})"
+
+export LOG_LEVEL="${log_level}"
+export INGRESS_PORT=8099
+export STATIC_ROOT=/app/public
+
+# The ingress guard is active: only the Supervisor ingress peer may connect.
+exec node /app/dist-server/index.cjs

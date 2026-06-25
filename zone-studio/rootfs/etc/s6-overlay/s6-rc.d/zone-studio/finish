@@ -1,0 +1,6 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# Take the container down when the server stops, so the Supervisor restarts it
+# ==============================================================================
+bashio::log.info "Sense360 Zone Studio stopped, halting container"
+exec /run/s6/basedir/bin/halt

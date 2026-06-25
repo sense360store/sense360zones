@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Build, test, lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zone-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: zone-studio/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build SPA
+        run: npm run build:web
+      - name: Bundle server
+        run: npm run build:server
+      - name: Assert relative asset URLs (ingress)
+        run: node scripts/assert-relative-assets.mjs
+      - name: Test
+        run: npm test
+      - name: Lint
+        run: npm run lint
+
+  addon-lint:
+    name: Add-on linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the add-on
+        uses: frenck/action-addon-linter@v2.21.0
+        with:
+          path: ./zone-studio
+
+  image-smoke:
+    name: Image smoke test (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build runtime image
+        run: docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 -t zone-studio:ci zone-studio
+      - name: Run the container
+        run: docker run -d --name zs -e ALLOW_ALL_ORIGINS=1 -p 8099:8099 zone-studio:ci
+      - name: Wait for the server
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8099/health >/dev/null && exit 0
+            sleep 1
+          done
+          echo "server did not become healthy" >&2
+          docker logs zs || true
+          exit 1
+      - name: Smoke test (SPA, API, WebSocket, ingress subpath)
+        run: node zone-studio/scripts/smoke.mjs http://127.0.0.1:8099
+      - name: Container logs
+        if: always()
+        run: docker logs zs || true
