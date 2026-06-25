@@ -9,12 +9,38 @@ Zone Studio opens through Home Assistant ingress, so it is reachable from the
 sidebar with no extra port or login. It serves a single page application backed
 by a small server.
 
-This is the Phase 1 add-on shell. The data is still simulated: the server
-streams a moving set of mock targets and returns a fixed room with one device
-and two sensors. The architecture is the real one, though. The frontend talks to
-the backend over HTTP and a WebSocket, and a later phase replaces only the
-server's data provider with a real Home Assistant connection. Nothing you do here
-is written to hardware yet.
+The server connects to Home Assistant and shows your real sensors. It discovers
+ESPHome devices and entities, lists the rooms and devices it finds in the top bar
+picker, and tracks live LD2450 targets on the canvas as people move. Pick a room
+and a device to view, and the canvas follows that device.
+
+This release is read only. It does not write zones, bands, or any setting to a
+device; drawing and tuning come in a later phase. The DFRobot SEN0609 is
+discovered and its range band is shown as configured, but its live presence and
+distance are not streamed yet.
+
+## Connection states
+
+The top bar shows the connection at a glance, and the canvas shows a clear
+message when there is nothing to draw:
+
+- Connecting: discovery is in progress.
+- Live: Home Assistant answered and at least one sensor was found.
+- No sensors: Home Assistant answered but no LD2450 or SEN0609 device was
+  detected. Check that the sensors are set up in ESPHome, then retry.
+- Offline: the add-on could not reach the Home Assistant WebSocket API. It keeps
+  retrying in the background; use Retry to check again.
+
+The add-on never shows simulated data in place of a real connection.
+
+## Correcting a misdetected device
+
+Detection is heuristic. It identifies an LD2450 by its per target x and y
+coordinate entities, and a SEN0609 by its presence sensor. If a device is read
+wrongly, you can override it with a record under the add-on data directory
+(`/data/zone-studio.json`) that forces the device kind and the entity roles.
+Auto-detection only seeds the mapping where there is no override, so your
+correction persists across restarts.
 
 ## Installation
 

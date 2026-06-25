@@ -16,10 +16,11 @@
 import { Canvas } from './canvas/Canvas'
 import { CanvasToolbar } from './canvas/CanvasToolbar'
 import { css } from './lib/css'
+import { ConnectionOverlay } from './panels/ConnectionOverlay'
 import { Inspector } from './panels/Inspector'
 import { LeftPanel } from './panels/LeftPanel'
 import { TopBar } from './panels/TopBar'
-import { useEditorState } from './store/hooks'
+import { store, useEditorState } from './store/hooks'
 
 export default function ZoneStudio() {
   const s = useEditorState()
@@ -31,7 +32,7 @@ export default function ZoneStudio() {
       )}
     >
       <TopBar />
-      <div style={css('flex:1;display:flex;min-height:0;')}>
+      <div style={css('flex:1;display:flex;min-height:0;position:relative;')}>
         <LeftPanel />
         <div style={css('flex:1;min-width:0;background:var(--canvas);display:flex;flex-direction:column;position:relative;')}>
           <CanvasToolbar />
@@ -40,6 +41,8 @@ export default function ZoneStudio() {
           </div>
         </div>
         <Inspector />
+        {/* Honest connection/empty state over the editor; hidden when connected. */}
+        <ConnectionOverlay state={s.connection} onRetry={() => store.refresh()} />
       </div>
     </div>
   )

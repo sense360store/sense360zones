@@ -81,3 +81,9 @@
     opacity: 0;
   }
 }
+
+@keyframes zsspin {
+  to {
+    transform: rotate(360deg);
+  }
+}

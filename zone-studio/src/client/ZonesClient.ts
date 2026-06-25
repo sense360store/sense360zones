@@ -6,12 +6,21 @@
  * Assistant WebSocket API without the UI changing: discovery, the live target
  * stream, and the read/write config path all flow through this interface.
  */
-import type { BandConfig, Room, Target, Zone } from '../domain/types'
+import type { BandConfig, Room, SensorMount, Target, Zone } from '../domain/types'
 
-/** The authored configuration for one device's sensors. */
+/**
+ * The authored configuration for one device's sensors. Mirrors the server's
+ * `DeviceConfig` (see server/provider/DataProvider.ts), so a value serialised on
+ * either side deserialises cleanly on the other.
+ *
+ * `mount` is calibration persisted app-side (Phase 2): the LD2450 cannot report
+ * its own placement, so it rides on this payload to round-trip through the
+ * existing read/write path. It is optional so the mock client can omit it.
+ */
 export interface DeviceConfig {
   zones: Zone[]
   band: BandConfig
+  mount?: SensorMount
 }
 
 export type TargetListener = (targets: Target[]) => void

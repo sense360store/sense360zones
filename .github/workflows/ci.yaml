@@ -44,7 +44,7 @@ jobs:
           path: ./zone-studio
 
   image-smoke:
-    name: Image smoke test (amd64)
+    name: Image smoke test (PROVIDER=mock)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
       - name: Build runtime image
         run: docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 -t zone-studio:ci zone-studio
       - name: Run the container
-        run: docker run -d --name zs -e ALLOW_ALL_ORIGINS=1 -p 8099:8099 zone-studio:ci
+        run: docker run -d --name zs -e ALLOW_ALL_ORIGINS=1 -e PROVIDER=mock -p 8099:8099 zone-studio:ci
       - name: Wait for the server
         run: |
           for i in $(seq 1 60); do
@@ -69,3 +69,52 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs zs || true
+
+  image-smoke-ha:
+    name: Image smoke test (PROVIDER=ha, simulator)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zone-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: zone-studio/package-lock.json
+      - run: npm ci
+      - name: Build runtime image
+        run: docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 -t zone-studio:ci .
+      - name: Exercise the real HA provider against the WebSocket simulator
+        run: |
+          set -e
+          # Start the simulator on the host. The runtime container reaches it over
+          # the host network, so this drives the real provider path end to end.
+          HA_SIM_PORT=8123 HA_SIM_TOKEN=test-token npx tsx test/ha-sim.ts &
+          SIM_PID=$!
+          sleep 3
+          docker run -d --name zs-ha --network host \
+            -e ALLOW_ALL_ORIGINS=1 \
+            -e PROVIDER=ha \
+            -e HA_WS_URL=ws://127.0.0.1:8123/websocket \
+            -e SUPERVISOR_TOKEN=test-token \
+            zone-studio:ci
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8099/health >/dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then
+            echo "server did not become healthy" >&2
+            docker logs zs-ha || true
+            kill "$SIM_PID" 2>/dev/null || true
+            exit 1
+          fi
+          node scripts/smoke-ha.mjs http://127.0.0.1:8099
+          status=$?
+          kill "$SIM_PID" 2>/dev/null || true
+          exit $status
+      - name: Container logs
+        if: always()
+        run: docker logs zs-ha || true

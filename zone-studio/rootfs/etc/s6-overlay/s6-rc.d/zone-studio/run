@@ -11,5 +11,10 @@ export LOG_LEVEL="${log_level}"
 export INGRESS_PORT=8099
 export STATIC_ROOT=/app/public
 
+# The provider defaults to `ha`: the server connects to the Home Assistant
+# WebSocket API at ws://supervisor/core/websocket using SUPERVISOR_TOKEN, which
+# the Supervisor already injects into the add-on environment. The mapping and
+# mount record persists under DATA_DIR, which defaults to the /data volume.
+#
 # The ingress guard is active: only the Supervisor ingress peer may connect.
 exec node /app/dist-server/index.cjs

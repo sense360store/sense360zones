@@ -11,12 +11,21 @@
  * frontend's `DeviceConfig` (both reference the same domain `Zone`/`BandConfig`),
  * so a value serialised on either side deserialises cleanly on the other.
  */
-import type { BandConfig, Room, Target, Zone } from '../../src/domain/types'
+import type { BandConfig, Room, SensorMount, Target, Zone } from '../../src/domain/types'
 
-/** The authored configuration for one device's sensors. */
+/**
+ * The authored configuration for one device's sensors.
+ *
+ * `mount` is calibration (Phase 2): the LD2450 does not report its own placement,
+ * so the surface, height, origin and boresight stay user supplied and persist
+ * app-side. It rides on this payload so it round-trips through the existing
+ * read/write path without changing the provider contract. It is optional so the
+ * mock provider, which has no persistence, can omit it.
+ */
 export interface DeviceConfig {
   zones: Zone[]
   band: BandConfig
+  mount?: SensorMount
 }
 
 export type TargetListener = (targets: Target[]) => void

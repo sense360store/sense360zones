@@ -1,7 +1,7 @@
 {
   "name": "sense360-zone-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Sense360 Zone Studio — radar/sensor zone configuration add-on",
   "engines": {
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "concurrently -n web,api -c blue,green \"vite\" \"npm:dev:server\"",
-    "dev:server": "ALLOW_ALL_ORIGINS=1 tsx watch server/index.ts",
+    "dev:server": "ALLOW_ALL_ORIGINS=1 PROVIDER=mock tsx watch server/index.ts",
     "build": "npm run typecheck && npm run build:web && npm run build:server",
     "build:web": "vite build",
     "build:server": "node esbuild.server.mjs",
@@ -23,13 +23,15 @@
   "dependencies": {
     "@fastify/static": "^8.0.4",
     "@fastify/websocket": "^11.0.2",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@types/node": "^22.10.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "esbuild": "^0.24.2",
