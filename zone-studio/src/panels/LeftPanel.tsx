@@ -2,6 +2,7 @@ import { css } from '../lib/css'
 import { occupancyCounts, zoneMeta } from '../domain/geometry'
 import { store, useEditorState } from '../store/hooks'
 import { ApplyGuardrail, applyView } from './ApplyGuardrail'
+import { EsphomeExport } from './EsphomeExport'
 
 interface LayerRow {
   key: 'ld' | 'sen'
@@ -143,8 +144,10 @@ export function LeftPanel() {
         </div>
       </div>
 
-      {/* Active profile and the reasons Apply is blocked, pinned below the list. */}
+      {/* Active profile and what Apply does, pinned below the list. */}
       <ApplyGuardrail view={applyView(s)} />
+      {/* The durable ESPHome export for the drawn zones. */}
+      <EsphomeExport />
     </div>
   )
 }

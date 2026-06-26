@@ -27,10 +27,26 @@ export function zonePtsM(z: Zone): Point[] {
   return z.shape === 'poly' ? z.pts : rectCorners(z)
 }
 
-/** Ray-casting point-in-polygon test. */
+/** True when `p` lies on segment `a`–`b`, within `eps` metres. */
+function onSegment(p: Point, a: Point, b: Point, eps = 1e-9): boolean {
+  const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+  if (Math.abs(cross) > eps) return false
+  // Collinear: require p to sit between a and b, not on the line beyond them.
+  const dot = (p.x - a.x) * (p.x - b.x) + (p.y - a.y) * (p.y - b.y)
+  return dot <= eps
+}
+
+/**
+ * Ray-casting point-in-polygon test, robust for non-convex (e.g. L-shaped)
+ * polygons. A point on the boundary counts as inside, so a target standing on a
+ * zone edge reads as occupied rather than flickering on the ray's ambiguous
+ * crossing. The shared occupancy evaluator (domain/occupancy.ts) builds on this,
+ * so the canvas preview and the published entities test geometry identically.
+ */
 export function pointInPolygon(pt: Point, poly: Point[]): boolean {
   let inside = false
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (onSegment(pt, poly[i], poly[j])) return true
     const xi = poly[i].x
     const yi = poly[i].y
     const xj = poly[j].x

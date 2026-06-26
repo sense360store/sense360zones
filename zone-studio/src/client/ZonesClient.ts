@@ -21,6 +21,14 @@ export interface DeviceConfig {
   zones: Zone[]
   band: BandConfig
   mount?: SensorMount
+  /**
+   * Whether the MQTT publish path is available for this device's polygon zones
+   * (Phase 4). Set by the backend on a polygon-profile device, undefined otherwise.
+   * The editor surfaces it so the user knows the live entities require the Home
+   * Assistant MQTT integration. It rides on the read payload, so the client
+   * contract is unchanged.
+   */
+  mqttAvailable?: boolean
 }
 
 export type TargetListener = (targets: Target[]) => void

@@ -21,11 +21,15 @@ import {
   regionToRect,
   type NativeRegion,
 } from '../../src/domain/native'
+import { resolveProfile } from '../../src/domain/profile'
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../../src/domain/constants'
 import type { BandConfig, Point, Room, Sensor, SensorMount, Target, Zone, ZoneType } from '../../src/domain/types'
 import { resolveMapping } from '../ha/detect'
 import { sensorToRoom, toMetres } from '../ha/frame'
 import { HaWsClient, type ConnectionState, type Logger } from '../ha/HaWsClient'
+import { AVAILABILITY_TOPIC } from '../mqtt/discovery'
+import { OccupancyRuntime } from '../mqtt/OccupancyRuntime'
+import { supervisorMqttFactory, type MqttPublisher, type MqttPublisherFactory } from '../mqtt/MqttPublisher'
 import {
   UNAVAILABLE_STATES,
   type AreaRegistryEntry,
@@ -66,6 +70,13 @@ export interface HaDataProviderOptions {
   reconnectBaseMs?: number
   reconnectMaxMs?: number
   timeoutMs?: number
+  /**
+   * How the live polygon-occupancy path obtains an MQTT publisher. Defaults to the
+   * Supervisor MQTT service; the test suite injects a factory returning a fake.
+   */
+  mqttFactory?: MqttPublisherFactory
+  /** Debounce for occupancy transitions (milliseconds). Tests use 0 for immediacy. */
+  occupancyDebounceMs?: { on: number; off: number }
 }
 
 export class HaDataProvider implements DataProvider {
@@ -77,9 +88,22 @@ export class HaDataProvider implements DataProvider {
   private states = new Map<string, HassState>()
   private mappings = new Map<string, DeviceMapping>()
   private rooms: Room[] = []
+  /** Display names per device, used for the published MQTT device block. */
+  private deviceNames = new Map<string, string>()
+
+  // ---- live polygon occupancy (Phase 4) ----------------------------------
+  private readonly mqttFactory: MqttPublisherFactory
+  private readonly occupancyDebounceMs?: { on: number; off: number }
+  private publisher: MqttPublisher | null = null
+  private publisherPending: Promise<MqttPublisher | null> | null = null
+  private occupancy: OccupancyRuntime | null = null
+  /** Tri-state: undefined until a polygon device first needs MQTT, then the outcome. */
+  private mqttAvailable: boolean | undefined
 
   constructor(opts: HaDataProviderOptions) {
     this.logger = opts.logger ?? noopLogger
+    this.mqttFactory = opts.mqttFactory ?? supervisorMqttFactory
+    this.occupancyDebounceMs = opts.occupancyDebounceMs
     this.client = new HaWsClient({
       url: opts.wsUrl,
       token: opts.token,
@@ -155,7 +179,12 @@ export class HaDataProvider implements DataProvider {
     }
 
     this.rooms = [...roomsById.values()]
+    this.deviceNames = new Map(this.rooms.flatMap((r) => r.devices).map((d) => [d.id, d.name]))
     this.logDetection(devices.length)
+
+    // Re-activate the live evaluator for any device persisted as polygon, so its
+    // entities reappear and tracking resumes after an add-on restart.
+    await this.reactivatePolygonDevices()
     return clone(this.rooms)
   }
 
@@ -163,8 +192,21 @@ export class HaDataProvider implements DataProvider {
     const mount = this.persistence.getMount(deviceId) ?? clone(DEFAULT_MOUNT)
     const mapping = this.mappings.get(deviceId)
 
-    // LD2450 with region entities: the device is the truth. Re-read live state and
-    // reconstruct the zones, so Revert reflects the hardware, not the edit cache.
+    // Polygon profile: the device is in report-all mode and the add-on evaluates
+    // the zones, so the persisted active config is the truth, not the hardware
+    // (which now reconstructs to nothing). Surface whether MQTT is publishing.
+    if (this.persistence.getProfile(deviceId) === 'polygon') {
+      return {
+        zones: clone(this.persistence.getZones(deviceId) ?? []),
+        band: clone(this.persistence.getBand(deviceId) ?? DEFAULT_BAND),
+        mount,
+        mqttAvailable: this.mqttAvailable ?? false,
+      }
+    }
+
+    // Native LD2450 with region entities: the device is the truth. Re-read live
+    // state and reconstruct the zones, so Revert reflects the hardware, not the
+    // edit cache.
     if (mapping && mapping.kind === 'ld2450' && mapping.roles.zones && mapping.roles.zoneType) {
       const states = await this.refreshStates()
       return {
@@ -187,57 +229,26 @@ export class HaDataProvider implements DataProvider {
     if (config.mount) this.persistence.setMount(deviceId, config.mount)
     const mount = config.mount ?? this.persistence.getMount(deviceId) ?? clone(DEFAULT_MOUNT)
     const mapping = this.mappings.get(deviceId)
+    const isLd2450 = mapping?.kind === 'ld2450'
+    const nativeCapable = Boolean(isLd2450 && mapping!.roles.zones && mapping!.roles.zoneType)
 
-    const nativeCapable = mapping && mapping.kind === 'ld2450' && mapping.roles.zones && mapping.roles.zoneType
-    if (!nativeCapable) {
-      // SEN0609, or an LD2450 without region entities: keep the authored config
-      // app-side. No registers are written to a SEN0609 in this phase.
+    // SEN0609, or an unmapped device: keep the authored config app-side, exactly as
+    // in Phase 3. Polygon zones are an LD2450 capability.
+    if (!isLd2450) {
       this.persistence.setZones(deviceId, clone(config.zones))
       this.persistence.setBand(deviceId, clone(config.band))
       return
     }
 
-    // Validate before touching hardware. A bad write changes detection in a real
-    // room, so refuse the whole set rather than write a partial result.
-    const violations = nativeViolations(config.zones, mount)
-    if (violations.length) {
-      throw new Error(`Cannot apply zones natively: ${violations.join('; ')}`)
+    // The resolved profile decides the apply path and the source of truth. The
+    // resolver and the native write share `nativeViolations`, so eligibility is
+    // judged in exactly one place.
+    const profile = resolveProfile(config.zones, mount).profile
+    if (profile === 'native') {
+      await this.applyNative(deviceId, config, mount, mapping!, nativeCapable)
+    } else {
+      await this.applyPolygon(deviceId, config, mount, mapping!, nativeCapable)
     }
-
-    await this.client.connect()
-    const zoneRoles = mapping!.roles.zones!
-    const selectId = mapping!.roles.zoneType!
-
-    // Match the model's mode to one of the select's own options, case-insensitively
-    // (option strings vary by component build, so they are not hardcoded).
-    const states = await this.refreshStates()
-    const options = (states.get(selectId)?.attributes?.options as string[] | undefined) ?? []
-    const mode: ZoneMode = config.zones.length ? config.zones[0].type : 'none'
-    const option = optionForMode(options, mode)
-    if (!option) {
-      throw new Error(`The zone_type select has no option for "${mode}" (options: ${options.join(', ') || 'none'})`)
-    }
-
-    // Write each used slot; clear the rest so a removed zone does not linger.
-    const regions = config.zones.map((z) => nativeRegion(z, mount)!)
-    for (let slot = 0; slot < MAX_NATIVE_ZONES; slot++) {
-      const roles = zoneRoles[slot]
-      if (!roles) continue
-      const region = regions[slot] ?? CLEARED_REGION
-      await this.setNumber(roles.x1, region.x1)
-      await this.setNumber(roles.y1, region.y1)
-      await this.setNumber(roles.x2, region.x2)
-      await this.setNumber(roles.y2, region.y2)
-    }
-    await this.client.callService('select', 'select_option', { option }, { entity_id: selectId })
-
-    // Read back and confirm the device reflects exactly what was sent.
-    await this.confirmWrite(zoneRoles, regions, selectId, option)
-
-    // Persist the applied set as the new baseline record.
-    this.persistence.setZones(deviceId, clone(config.zones))
-    this.persistence.setBand(deviceId, clone(config.band))
-    this.logger.info({ deviceId, zones: config.zones.length, mode }, 'applied native LD2450 zones')
   }
 
   subscribeTargets(deviceId: string, onSample: TargetListener): Unsubscribe {
@@ -281,10 +292,181 @@ export class HaDataProvider implements DataProvider {
   }
 
   dispose(): void {
+    this.occupancy?.dispose()
+    // Closing the publisher publishes the offline availability before the socket
+    // drops, so the entities show unavailable rather than disappearing.
+    void this.publisher?.close()
     this.client.close()
   }
 
   // ---- internals ---------------------------------------------------------
+
+  /** The native LD2450 apply path (Phase 3): validate, write registers, read back. */
+  private async applyNative(
+    deviceId: string,
+    config: DeviceConfig,
+    mount: SensorMount,
+    mapping: DeviceMapping,
+    nativeCapable: boolean,
+  ): Promise<void> {
+    if (!nativeCapable) {
+      // A native-eligible set on an LD2450 without region entities: nothing to
+      // write to hardware, so keep it app-side like a SEN0609.
+      this.persistence.setZones(deviceId, clone(config.zones))
+      this.persistence.setBand(deviceId, clone(config.band))
+      this.persistence.setProfile(deviceId, 'native')
+      return
+    }
+
+    // Validate before touching hardware. A bad write changes detection in a real
+    // room, so refuse the whole set rather than write a partial result.
+    const violations = nativeViolations(config.zones, mount)
+    if (violations.length) {
+      throw new Error(`Cannot apply zones natively: ${violations.join('; ')}`)
+    }
+
+    await this.client.connect()
+    const zoneRoles = mapping.roles.zones!
+    const selectId = mapping.roles.zoneType!
+
+    // Match the model's mode to one of the select's own options, case-insensitively
+    // (option strings vary by component build, so they are not hardcoded).
+    const states = await this.refreshStates()
+    const options = (states.get(selectId)?.attributes?.options as string[] | undefined) ?? []
+    const mode: ZoneMode = config.zones.length ? config.zones[0].type : 'none'
+    const option = optionForMode(options, mode)
+    if (!option) {
+      throw new Error(`The zone_type select has no option for "${mode}" (options: ${options.join(', ') || 'none'})`)
+    }
+
+    // Write each used slot; clear the rest so a removed zone does not linger.
+    const regions = config.zones.map((z) => nativeRegion(z, mount)!)
+    for (let slot = 0; slot < MAX_NATIVE_ZONES; slot++) {
+      const roles = zoneRoles[slot]
+      if (!roles) continue
+      const region = regions[slot] ?? CLEARED_REGION
+      await this.setNumber(roles.x1, region.x1)
+      await this.setNumber(roles.y1, region.y1)
+      await this.setNumber(roles.x2, region.x2)
+      await this.setNumber(roles.y2, region.y2)
+    }
+    await this.client.callService('select', 'select_option', { option }, { entity_id: selectId })
+
+    // Read back and confirm the device reflects exactly what was sent.
+    await this.confirmWrite(zoneRoles, regions, selectId, option)
+
+    // The hardware is the truth again: tear down any live polygon evaluation and
+    // persist the applied set as the new baseline record.
+    this.occupancy?.deactivate(deviceId)
+    this.persistence.setZones(deviceId, clone(config.zones))
+    this.persistence.setBand(deviceId, clone(config.band))
+    this.persistence.setProfile(deviceId, 'native')
+    this.logger.info({ deviceId, zones: config.zones.length, mode }, 'applied native LD2450 zones')
+  }
+
+  /**
+   * The polygon apply path (Phase 4): put the LD2450 into report-all mode so the
+   * evaluator sees every target, persist the set as the active baseline (the truth
+   * for a polygon device), and activate the live evaluator and the published
+   * entities. Never writes a native region for a non-eligible set.
+   */
+  private async applyPolygon(
+    deviceId: string,
+    config: DeviceConfig,
+    mount: SensorMount,
+    mapping: DeviceMapping,
+    nativeCapable: boolean,
+  ): Promise<void> {
+    if (nativeCapable) {
+      await this.client.connect()
+      await this.setReportAll(mapping)
+    }
+
+    this.persistence.setZones(deviceId, clone(config.zones))
+    this.persistence.setBand(deviceId, clone(config.band))
+    this.persistence.setProfile(deviceId, 'polygon')
+
+    await this.activatePolygon(deviceId)
+    this.logger.info(
+      { deviceId, zones: config.zones.length, mqtt: this.mqttAvailable ?? false },
+      'applied polygon zones (report-all + live occupancy)',
+    )
+  }
+
+  /**
+   * Put a native-capable LD2450 into report-all mode: clear every region slot and
+   * disable the zone_type select, so the device filters nothing and the evaluator
+   * sees all targets.
+   */
+  private async setReportAll(mapping: DeviceMapping): Promise<void> {
+    const zoneRoles = mapping.roles.zones!
+    const selectId = mapping.roles.zoneType!
+    for (let slot = 0; slot < MAX_NATIVE_ZONES; slot++) {
+      const roles = zoneRoles[slot]
+      if (!roles) continue
+      await this.setNumber(roles.x1, CLEARED_REGION.x1)
+      await this.setNumber(roles.y1, CLEARED_REGION.y1)
+      await this.setNumber(roles.x2, CLEARED_REGION.x2)
+      await this.setNumber(roles.y2, CLEARED_REGION.y2)
+    }
+    const states = await this.refreshStates()
+    const options = (states.get(selectId)?.attributes?.options as string[] | undefined) ?? []
+    const option = optionForMode(options, 'none')
+    if (option) {
+      await this.client.callService('select', 'select_option', { option }, { entity_id: selectId })
+    }
+  }
+
+  /** Re-activate the live evaluator for every device persisted as polygon. */
+  private async reactivatePolygonDevices(): Promise<void> {
+    for (const deviceId of this.deviceNames.keys()) {
+      if (this.persistence.getProfile(deviceId) === 'polygon') {
+        await this.activatePolygon(deviceId)
+      }
+    }
+  }
+
+  /**
+   * Activate (or refresh) the live occupancy evaluator and published entities for a
+   * polygon device. Degrades cleanly when MQTT is unavailable: it records the
+   * outcome (surfaced through readConfig) and leaves the canvas preview working,
+   * rather than failing the device.
+   */
+  private async activatePolygon(deviceId: string): Promise<void> {
+    const runtime = await this.ensureRuntime()
+    if (!runtime) return // MQTT unavailable: preview-only, mqttAvailable already false
+    const zones = clone(this.persistence.getZones(deviceId) ?? [])
+    const name = this.deviceNames.get(deviceId) ?? deviceId
+    runtime.activate({ id: deviceId, name }, zones, (cb) => this.subscribeTargets(deviceId, cb))
+  }
+
+  /** Lazily build the MQTT publisher and the runtime, once, on first polygon need. */
+  private async ensureRuntime(): Promise<OccupancyRuntime | null> {
+    if (this.occupancy) return this.occupancy
+    if (!this.publisherPending) {
+      this.publisherPending = this.mqttFactory(AVAILABILITY_TOPIC, this.logger).catch((err) => {
+        this.logger.warn(
+          { err: String(err) },
+          'MQTT publisher unavailable; the MQTT integration is required to publish polygon zone entities',
+        )
+        return null
+      })
+    }
+    const publisher = await this.publisherPending
+    if (!publisher) {
+      this.mqttAvailable = false
+      return null
+    }
+    this.publisher = publisher
+    this.mqttAvailable = true
+    this.occupancy = new OccupancyRuntime({
+      publisher,
+      logger: this.logger,
+      onDelayMs: this.occupancyDebounceMs?.on,
+      offDelayMs: this.occupancyDebounceMs?.off,
+    })
+    return this.occupancy
+  }
 
   private buildSensor(deviceId: string, mapping: DeviceMapping, mount: SensorMount): Sensor {
     if (mapping.kind === 'ld2450') {

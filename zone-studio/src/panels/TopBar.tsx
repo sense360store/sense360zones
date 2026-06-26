@@ -136,7 +136,11 @@ export function TopBar() {
       <button
         onClick={() => void store.apply()}
         disabled={!view.canApply}
-        title={view.resolution.reasons.length ? view.resolution.reasons.join('\n') : 'Apply to sensors'}
+        title={
+          view.resolution.profile === 'polygon'
+            ? 'Apply: live occupancy evaluated by the add-on and published to Home Assistant over MQTT'
+            : 'Apply to sensors'
+        }
         style={css(view.canApply ? applyStyleOn : applyStyleOff)}
       >
         {view.applying ? 'Applying…' : 'Apply to sensors'}

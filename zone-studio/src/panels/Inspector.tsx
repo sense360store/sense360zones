@@ -1,5 +1,6 @@
 import { css } from '../lib/css'
 import { occupancyCounts } from '../domain/geometry'
+import { evaluateOccupancy } from '../domain/occupancy'
 import { useEditorState } from '../store/hooks'
 import { BandPanel } from './BandPanel'
 import { LdPanel } from './LdPanel'
@@ -17,7 +18,7 @@ export function Inspector() {
     >
       {selZone && <ZonePanel zone={selZone} count={occupancyCounts([selZone], s.targets)[selZone.id] || 0} />}
       {s.sel.kind === 'sen' && <BandPanel band={s.band} />}
-      {s.sel.kind === 'ld' && <LdPanel targets={s.targets} />}
+      {s.sel.kind === 'ld' && <LdPanel targets={s.targets} presence={evaluateOccupancy(s.zones, s.targets).presence} />}
       {s.sel.kind === 'none' && (
         <div style={css('padding:40px 24px;text-align:center;color:var(--faint);')}>
           <div style={css('font-size:13px;line-height:1.6;')}>
