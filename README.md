@@ -22,11 +22,13 @@ out detection and exclusion zones over a live canvas, tune sensor range bands, a
 watch tracked targets move. It supports the HLK LD2450 (spatial X/Y tracking, owns
 the drawable zones) and the DFRobot SEN0609 / C4001 (radial range band).
 
-This is the Phase 1 add-on shell. The data is still simulated, but it now flows
-through the real architecture: the frontend talks to a backend over HTTP and a
-WebSocket, the app is packaged as an installable add-on, and a multi architecture
-image is built in CI. A later phase replaces only the backend's data provider with
-a real Home Assistant connection. See [ROADMAP.md](./ROADMAP.md) and
+The backend now connects to Home Assistant. It discovers ESPHome devices and
+entities, maps them to the room, device, and sensor model, and streams live
+LD2450 targets onto the canvas, with a picker for the real rooms and devices and
+honest connection states. This release is read only: nothing is written to a
+device, and the SEN0609 is discovered but its live presence is not streamed yet.
+The data contract and the frontend client are unchanged, so only the backend's
+data provider changed. See [ROADMAP.md](./ROADMAP.md) and
 [DECISIONS.md](./DECISIONS.md).
 
 User facing documentation is in [`zone-studio/DOCS.md`](./zone-studio/DOCS.md).

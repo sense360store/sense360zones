@@ -12,7 +12,7 @@
  * the same "one update, whole tree re-renders" model the class component had.
  */
 import { snapHalf } from '../domain/geometry'
-import type { BandConfig, Point, PolyZone, RectZone, Room, Target, Zone } from '../domain/types'
+import type { BandConfig, Point, PolyZone, RectZone, Room, SensorMount, Target, Zone } from '../domain/types'
 import type { Seed } from '../client/MockZonesClient'
 import type { Unsubscribe, ZonesClient } from '../client/ZonesClient'
 
@@ -21,6 +21,16 @@ import type { Unsubscribe, ZonesClient } from '../client/ZonesClient'
 export type View = 'wall' | 'ceiling'
 export type Tool = 'select' | 'rect' | 'rot' | 'poly'
 
+/**
+ * The honest connection state, surfaced so the UI never shows simulated data for
+ * a real failure:
+ *   - connecting    discovery is in flight (first paint, or a retry),
+ *   - connected     Home Assistant answered and at least one device was found,
+ *   - no-devices    Home Assistant answered but no radar sensors were detected,
+ *   - offline       Home Assistant (or the backend) could not be reached.
+ */
+export type ConnectionState = 'connecting' | 'connected' | 'no-devices' | 'offline'
+
 export type Selection =
   | { kind: 'zone'; id: string }
   | { kind: 'sen' } // SEN0609 radial band
@@ -28,10 +38,12 @@ export type Selection =
   | { kind: 'none' }
 
 export interface EditorState {
-  // device model (from the client) — drives header + future room/device picker
+  // device model (from the client) — drives the room/device picker
   rooms: Room[]
   activeRoomId: string
   activeDeviceId: string
+  /** Connection to the data source. Drives the connection/empty state UI. */
+  connection: ConnectionState
   // UI
   theme: 'light' | 'dark'
   view: View
@@ -41,6 +53,8 @@ export interface EditorState {
   // working copy of the active device's sensor config
   zones: Zone[]
   band: BandConfig
+  /** The active device's mount (calibration). Persisted via the config payload. */
+  mount: SensorMount | null
   // live + transient
   targets: Target[]
   draft: { pts: Point[] } | null
@@ -74,7 +88,7 @@ export class ZoneStudioStore {
   private state: EditorState
   private listeners = new Set<Listener>()
   private client: ZonesClient
-  private unsub: Unsubscribe
+  private unsub: Unsubscribe = () => {}
   private handle: DragHandle = null
   private idSeq = 0
 
@@ -84,6 +98,9 @@ export class ZoneStudioStore {
       rooms: seed.rooms,
       activeRoomId: seed.activeRoomId,
       activeDeviceId: seed.activeDeviceId,
+      // A seed that already carries devices is treated as connected (the mock and
+      // the tests); an empty seed starts connecting until refresh() resolves.
+      connection: seed.rooms.length ? 'connected' : 'connecting',
       theme: 'light',
       view: 'wall',
       tool: 'select',
@@ -91,12 +108,60 @@ export class ZoneStudioStore {
       sel: { kind: 'zone', id: seed.zones[0]?.id ?? '' },
       zones: seed.zones,
       band: seed.band,
+      mount: null,
       targets: [],
       draft: null,
       cursor: null,
       saved: snapshot(seed.zones, seed.band),
     }
-    this.unsub = client.streamTargets(seed.activeDeviceId, (targets) => this.set({ targets }))
+    this.resub(seed.activeDeviceId)
+  }
+
+  /**
+   * Discover the model from the data source and load the active device, setting
+   * the connection state honestly. This is the production entry point (called by
+   * instance.ts on start and by the offline-state retry). It never falls back to
+   * simulated data: a failure becomes the offline state, an empty result becomes
+   * the no-devices state.
+   */
+  async refresh(): Promise<void> {
+    this.set({ connection: 'connecting' })
+    try {
+      const rooms = await this.client.discover()
+      const devices = rooms.flatMap((r) => r.devices)
+      if (devices.length === 0) {
+        this.resub('')
+        this.set({ rooms, connection: 'no-devices', targets: [], sel: { kind: 'none' } })
+        return
+      }
+      // Keep the current selection if it still exists, else take the first device.
+      const room = rooms.find((r) => r.id === this.state.activeRoomId && r.devices.length) ?? rooms.find((r) => r.devices.length)!
+      const device = room.devices.find((d) => d.id === this.state.activeDeviceId) ?? room.devices[0]
+      const cfg = await this.client.readConfig(device.id)
+      this.resub(device.id)
+      this.set({
+        rooms,
+        activeRoomId: room.id,
+        activeDeviceId: device.id,
+        zones: cfg.zones,
+        band: cfg.band,
+        mount: cfg.mount ?? null,
+        saved: snapshot(cfg.zones, cfg.band),
+        sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
+        connection: 'connected',
+      })
+    } catch {
+      // Real failure: clear any live stream and show the offline state. Do not
+      // paper over it with simulated targets.
+      this.resub('')
+      this.set({ connection: 'offline', targets: [] })
+    }
+  }
+
+  /** Re-point the live target stream at a device (empty id tears it down). */
+  private resub(deviceId: string) {
+    this.unsub()
+    this.unsub = deviceId ? this.client.streamTargets(deviceId, (targets) => this.set({ targets })) : () => {}
   }
 
   /**
@@ -177,6 +242,40 @@ export class ZoneStudioStore {
     this.setFn((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } }))
   }
 
+  // ---- room / device picker ---------------------------------------------
+  /** Select a room and switch to its first device. */
+  setActiveRoom(roomId: string) {
+    const room = this.state.rooms.find((r) => r.id === roomId)
+    this.set({ activeRoomId: roomId })
+    if (room && room.devices.length) this.selectDevice(room.devices[0].id)
+  }
+
+  /**
+   * Switch the active device: re-subscribe its target stream and load its config.
+   * The config read is async; a newer selection supersedes a slower read.
+   */
+  selectDevice(deviceId: string) {
+    if (!deviceId || deviceId === this.state.activeDeviceId) return
+    const room = this.state.rooms.find((r) => r.devices.some((d) => d.id === deviceId))
+    this.resub(deviceId)
+    this.set({ activeDeviceId: deviceId, activeRoomId: room?.id ?? this.state.activeRoomId, targets: [] })
+    void this.client
+      .readConfig(deviceId)
+      .then((cfg) => {
+        if (this.state.activeDeviceId !== deviceId) return
+        this.set({
+          zones: cfg.zones,
+          band: cfg.band,
+          mount: cfg.mount ?? null,
+          saved: snapshot(cfg.zones, cfg.band),
+          sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
+        })
+      })
+      .catch(() => {
+        /* a failed read leaves the previous config in place */
+      })
+  }
+
   // ---- zone edits (typed, shape-aware) ----------------------------------
   private mutateZone(id: string, fn: (z: Zone) => Zone) {
     this.setFn((s) => ({ zones: s.zones.map((z) => (z.id === id ? fn(z) : z)) }))
@@ -204,9 +303,15 @@ export class ZoneStudioStore {
 
   // ---- apply / revert ----------------------------------------------------
   apply() {
-    const { zones, band, activeDeviceId } = this.state
-    // Phase 0: the mock no-ops; Phase 3 wires this to the real device.
-    void this.client.writeConfig(activeDeviceId, { zones: clone(zones), band: clone(band) })
+    const { zones, band, mount, activeDeviceId } = this.state
+    // Phase 2 is read-only with respect to hardware: the HA provider persists the
+    // mount (calibration) and keeps zones/band in memory. The mount rides on this
+    // payload so it round-trips. Phase 3 wires zones/band to the real device.
+    void this.client.writeConfig(activeDeviceId, {
+      zones: clone(zones),
+      band: clone(band),
+      ...(mount ? { mount } : {}),
+    })
     this.set({ saved: snapshot(zones, band) })
   }
   revert() {

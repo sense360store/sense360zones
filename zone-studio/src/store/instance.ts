@@ -1,38 +1,30 @@
 /*
  * Composition root: wire the concrete client to the store, once.
  *
- * Phase 1 runs the app against the Fastify backend. The live client is
- * `HttpZonesClient`: discovery and config over HTTP, the target stream over a
- * WebSocket. The store still needs a synchronous first-paint seed (so there is
- * no load flash), so we construct it from `MockZonesClient.seed()` — structure
- * only — and then replace that state with the backend's data via `hydrate()`
- * once `discover()` and `readConfig()` resolve. The live target animation is the
- * backend's; the frontend no longer simulates on the application path.
+ * The app runs against the Fastify backend through `HttpZonesClient`. Unlike
+ * Phase 1, the store is no longer seeded with simulated data: the first paint is
+ * an honest "connecting" state with no model, and `refresh()` then loads the real
+ * model and sets the connection state (connected, no-devices, or offline). The
+ * production path never falls back to mock targets to hide a Home Assistant
+ * failure.
  *
- * `MockZonesClient` stays in the tree for tests and offline development. Phase 2
- * changes only the backend's data provider, not this file.
+ * Development against the mock provider uses the same path: run the backend with
+ * PROVIDER=mock (the default for `npm run dev`) and the mock data arrives over the
+ * real HTTP and WebSocket transport, not from a frontend stand-in.
  */
 import { HttpZonesClient } from '../client/HttpZonesClient'
-import { MockZonesClient } from '../client/MockZonesClient'
+import type { Seed } from '../client/MockZonesClient'
+import type { BandConfig } from '../domain/types'
 import { ZoneStudioStore } from './store'
 
 const client = new HttpZonesClient()
 
-// Synchronous first-paint seed: the device/zone structure only. It is replaced
-// by the backend's authoritative config the moment discovery resolves.
-const bootstrap = new MockZonesClient().seed()
-export const store = new ZoneStudioStore(client, bootstrap)
+/** A neutral band so the canvas has valid values to draw before discovery. */
+const DEFAULT_BAND: BandConfig = { minR: 0.8, maxR: 4.4, beam: 50, trigSens: 7, sustSens: 5, reducedRange: 0 }
 
-// Load the real model from the backend over HTTP, then hydrate the store.
-void (async () => {
-  try {
-    const rooms = await client.discover()
-    const activeRoomId = rooms[0]?.id ?? bootstrap.activeRoomId
-    const activeDeviceId = rooms[0]?.devices[0]?.id ?? bootstrap.activeDeviceId
-    const { zones, band } = await client.readConfig(activeDeviceId)
-    store.hydrate({ rooms, activeRoomId, activeDeviceId, zones, band })
-  } catch (err) {
-    // Keep the first-paint seed on the canvas if the backend is unreachable.
-    console.error('Zone Studio: backend discovery failed, using bootstrap seed', err)
-  }
-})()
+// Empty first-paint seed: no rooms, no zones. The store starts in the connecting
+// state and renders the connection overlay until refresh() resolves.
+const emptySeed: Seed = { rooms: [], activeRoomId: '', activeDeviceId: '', zones: [], band: DEFAULT_BAND }
+export const store = new ZoneStudioStore(client, emptySeed)
+
+void store.refresh()

@@ -27,13 +27,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Pull request: build all architectures without pushing, for validation.
+      # The arch flags are explicit (the builder deprecated --all and now builds
+      # only amd64 and aarch64).
       - name: Build only (pull request)
         if: github.event_name == 'pull_request'
         uses: home-assistant/builder@2026.02.1
         with:
           args: |
             --test \
-            --all \
+            --amd64 \
+            --aarch64 \
             --target zone-studio \
             --docker-hub ghcr.io/sense360store
 
@@ -43,6 +46,7 @@ jobs:
         uses: home-assistant/builder@2026.02.1
         with:
           args: |
-            --all \
+            --amd64 \
+            --aarch64 \
             --target zone-studio \
             --docker-hub ghcr.io/sense360store

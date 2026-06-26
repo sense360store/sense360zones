@@ -1,3 +1,4 @@
+import type { ConnectionState } from '../store/store'
 import { css } from '../lib/css'
 import { isDirty } from '../store/store'
 import { store, useEditorState } from '../store/hooks'
@@ -7,18 +8,36 @@ const applyStyleOn =
 const applyStyleOff =
   'height:34px;padding:0 18px;border-radius:8px;border:1px solid var(--bd);background:var(--ins);color:var(--faint);font-family:Murecho;font-size:13px;font-weight:600;cursor:default;'
 
+const selectStyle =
+  'height:30px;max-width:190px;padding:0 8px;border-radius:7px;border:1px solid var(--bd);background:var(--ins);color:var(--tx);font-family:Murecho;font-size:12.5px;cursor:pointer;'
+
+/** Status dot colour and label per connection state. */
+function connStatus(state: ConnectionState): { label: string; color: string; pulse: boolean } {
+  switch (state) {
+    case 'connected':
+      return { label: 'live', color: 'var(--green)', pulse: true }
+    case 'connecting':
+      return { label: 'connecting', color: 'var(--mut)', pulse: true }
+    case 'no-devices':
+      return { label: 'no sensors', color: '#e0922a', pulse: false }
+    case 'offline':
+      return { label: 'offline', color: 'var(--excl)', pulse: false }
+  }
+}
+
 export function TopBar() {
   const s = useEditorState()
   const dirty = isDirty(s)
-  const room = s.rooms.find((r) => r.id === s.activeRoomId)
-  const sensorCount = room ? room.devices.reduce((n, d) => n + d.sensors.length, 0) : 0
+  const status = connStatus(s.connection)
+  const activeRoom = s.rooms.find((r) => r.id === s.activeRoomId)
+  const devices = activeRoom?.devices ?? []
   const themeLabel = s.theme === 'dark' ? 'Dark' : 'Light'
   const themeIcon = s.theme === 'dark' ? '☾' : '☀'
 
   return (
     <div
       style={css(
-        'height:56px;flex:none;display:flex;align-items:center;gap:18px;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--bd);z-index:5;',
+        'height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--bd);z-index:5;',
       )}
     >
       <div style={css('display:flex;align-items:center;gap:10px;')}>
@@ -34,14 +53,50 @@ export function TopBar() {
         </div>
       </div>
       <div style={css('width:1px;height:24px;background:var(--bd);')}></div>
-      <div style={css('display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--mut);')}>
+
+      {/* Connection status + room/device picker, driven by discover(). */}
+      <div style={css('display:flex;align-items:center;gap:10px;')}>
         <span
           style={css(
-            'width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulsedot 2.4s infinite;',
+            `width:7px;height:7px;border-radius:50%;flex:none;background:${status.color};box-shadow:0 0 8px ${status.color};` +
+              (status.pulse ? 'animation:pulsedot 2.4s infinite;' : ''),
           )}
         ></span>
-        {room?.name ?? 'Room'} · {sensorCount} sensors <span style={css('color:var(--faint);')}>· live</span>
+        {s.rooms.length > 0 ? (
+          <div style={css('display:flex;align-items:center;gap:8px;')}>
+            {s.rooms.length > 1 && (
+              <select
+                value={s.activeRoomId}
+                onChange={(e) => store.setActiveRoom(e.target.value)}
+                title="Room"
+                style={css(selectStyle)}
+              >
+                {s.rooms.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <select
+              value={s.activeDeviceId}
+              onChange={(e) => store.selectDevice(e.target.value)}
+              title="Device"
+              style={css(selectStyle)}
+            >
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <span style={css('font-size:11.5px;color:var(--faint);')}>{status.label}</span>
+          </div>
+        ) : (
+          <span style={css('font-size:12.5px;color:var(--mut);')}>{status.label}</span>
+        )}
       </div>
+
       <div style={css('flex:1;')}></div>
       <div
         onClick={() => store.toggleTheme()}

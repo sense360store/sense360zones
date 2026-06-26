@@ -11,7 +11,7 @@ data model (`domain/`), the `ZonesClient` seam with a mock implementation
 (`client/`), a typed store (`store/`), and the SVG canvas and panels. This gave
 every later phase a stable contract to build on.
 
-## Phase 1 — Add-on shell (this release)
+## Phase 1 — Add-on shell (done)
 
 Package the app as a Home Assistant add-on that installs from the sidebar and
 runs against a real backend, still serving mock data. A Fastify server serves the
@@ -21,11 +21,15 @@ a server side `MockDataProvider` reproduces the simulation. The frontend gains a
 transparent to the UI. Ingress, multi architecture image builds, and CI are set
 up here. No hardware is touched.
 
-## Phase 2 — Home Assistant data provider
+## Phase 2 — Home Assistant data provider (this release)
 
-Replace only the backend's data provider with one that talks to Home Assistant:
-discover real devices and sensors, and stream live LD2450 targets. The routes and
-the frontend do not change.
+Replace only the backend's data provider with one that talks to Home Assistant.
+An `HaDataProvider` connects to the Home Assistant WebSocket API, discovers
+ESPHome devices and entities, maps them to the room, device, and sensor model,
+and streams live LD2450 targets through the existing contract. The frontend gains
+a real room and device picker, honest connection states, and persisted mount. It
+is read only, and is verified against a WebSocket simulator since the loop cannot
+reach real hardware. The routes and the client contract do not change.
 
 ## Phase 3 — Apply path
 
