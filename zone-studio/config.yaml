@@ -6,7 +6,6 @@ url: https://github.com/sense360store/sense360zones
 arch:
   - aarch64
   - amd64
-  - armv7
 init: false
 ingress: true
 panel_icon: mdi:radar

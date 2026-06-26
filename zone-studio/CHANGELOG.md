@@ -36,6 +36,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release. SEN0609 live presence and distance streaming are deferred; its band is
   shown as configured, not live.
 
+### Removed
+
+- The armv7 architecture. The Home Assistant builder no longer builds 32 bit arm,
+  so the add-on now ships for aarch64 and amd64.
+
 ## [0.1.0] - 2026-06-25
 
 ### Added
