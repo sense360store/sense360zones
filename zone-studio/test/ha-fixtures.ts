@@ -52,6 +52,26 @@ export const LD = {
   t3speed: 'sensor.living_target_3_speed',
 }
 
+/** LD2450 native zone region numbers and the global zone_type select. */
+export const LDZ = {
+  z1x1: 'number.living_zone_1_x1',
+  z1y1: 'number.living_zone_1_y1',
+  z1x2: 'number.living_zone_1_x2',
+  z1y2: 'number.living_zone_1_y2',
+  z2x1: 'number.living_zone_2_x1',
+  z2y1: 'number.living_zone_2_y1',
+  z2x2: 'number.living_zone_2_x2',
+  z2y2: 'number.living_zone_2_y2',
+  z3x1: 'number.living_zone_3_x1',
+  z3y1: 'number.living_zone_3_y1',
+  z3x2: 'number.living_zone_3_x2',
+  z3y2: 'number.living_zone_3_y2',
+  zoneType: 'select.living_zone_type',
+}
+
+/** The zone_type select's option labels, as the official ld2450 component exposes. */
+export const ZONE_TYPE_OPTIONS = ['Disabled', 'Detection', 'Filter']
+
 export const SEN = {
   presence: 'binary_sensor.bedroom_presence',
   distance: 'sensor.bedroom_distance',
@@ -71,6 +91,7 @@ export const entities: EntityRegistryEntry[] = [
   esphome(LD.t3x, 'dev_ld'),
   esphome(LD.t3y, 'dev_ld'),
   esphome(LD.t3speed, 'dev_ld'),
+  ...Object.values(LDZ).map((id) => esphome(id, 'dev_ld')),
   esphome(SEN.presence, 'dev_sen'),
   esphome(SEN.distance, 'dev_sen'),
 ]
@@ -82,7 +103,11 @@ function state(entity_id: string, value: string, attributes: HassState['attribut
 const mm = { unit_of_measurement: 'mm' }
 const mmps = { unit_of_measurement: 'mm/s' }
 
-/** Initial states: target 1 occupied at (-1500, 1800) mm, 2 empty, 3 unavailable. */
+/**
+ * Initial states: target 1 occupied at (-1500, 1800) mm, 2 empty, 3 unavailable.
+ * The native zones start cleared (all corners 0) with the zone_type select
+ * Disabled, so a freshly discovered device reports no active zones.
+ */
 export function initialStates(): HassState[] {
   return [
     state(LD.t1x, '-1500', mm),
@@ -94,6 +119,10 @@ export function initialStates(): HassState[] {
     state(LD.t3x, 'unavailable', mm),
     state(LD.t3y, 'unavailable', mm),
     state(LD.t3speed, 'unavailable', mmps),
+    ...Object.values(LDZ)
+      .filter((id) => id !== LDZ.zoneType)
+      .map((id) => state(id, '0', mm)),
+    state(LDZ.zoneType, 'Disabled', { options: ZONE_TYPE_OPTIONS }),
     state(SEN.presence, 'off', { device_class: 'presence' }),
     state(SEN.distance, '2.4', { device_class: 'distance', unit_of_measurement: 'm' }),
   ]

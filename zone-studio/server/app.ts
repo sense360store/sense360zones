@@ -53,9 +53,18 @@ export async function buildServer(cfg: ServerConfig, provider: DataProvider): Pr
         provider.readConfig(req.params.deviceId),
       )
 
-      api.post<{ Params: { deviceId: string }; Body: DeviceConfig }>('/config/:deviceId', async (req) => {
-        await provider.writeConfig(req.params.deviceId, req.body)
-        // Echo the stored config back; Phase 1 has no hardware to confirm against.
+      api.post<{ Params: { deviceId: string }; Body: DeviceConfig }>('/config/:deviceId', async (req, reply) => {
+        try {
+          await provider.writeConfig(req.params.deviceId, req.body)
+        } catch (err) {
+          // A rejected write (a non-native set, or a value the device refused) is a
+          // client-actionable error, not a server fault. Return the reason so the
+          // editor can show it rather than a bare 500.
+          reply.code(422)
+          return { error: err instanceof Error ? err.message : 'write failed' }
+        }
+        // Echo back the device's config so the caller can reset its baseline to the
+        // confirmed read-back.
         return provider.readConfig(req.params.deviceId)
       })
     },

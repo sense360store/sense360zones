@@ -1,25 +1,33 @@
 /*
  * Per-device persistence for the HA provider.
  *
- * Phase 2 persists exactly two things, both calibration rather than device state:
- *   - the mapping override that corrects a misdetected device, and
- *   - the per-device mount (surface, height, origin, boresight).
+ * It persists, per device:
+ *   - the mapping override that corrects a misdetected device,
+ *   - the per-device mount (surface, height, origin, boresight), and
+ *   - the authored zone config (the in-progress edit) plus the SEN0609 band.
  *
- * Zone and band configuration persistence is Phase 3 and is intentionally not
- * stored here. The record lives in `${dataDir}/zone-studio.json`; `dataDir` is
- * `/data` inside the add-on and a temporary directory in development and tests,
- * so nothing here assumes the add-on volume exists.
+ * The authored zones are the editor's cache, not the truth for what is on the
+ * hardware: the device is the source of truth for Revert (see HaDataProvider.
+ * readConfig). Persisting the edit lets the editor survive a reload, and on the
+ * LD2450 it records the last applied set. The record lives in
+ * `${dataDir}/zone-studio.json`; `dataDir` is `/data` inside the add-on and a
+ * temporary directory in development and tests, so nothing here assumes the
+ * add-on volume exists.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { SensorMount } from '../src/domain/types'
+import type { BandConfig, SensorMount, Zone } from '../src/domain/types'
 import type { DeviceMappingOverride } from './ha/types'
 import type { Logger } from './ha/HaWsClient'
 
-/** What we keep for one device. Both fields are optional. */
+/** What we keep for one device. Every field is optional. */
 export interface DeviceRecord {
   mount?: SensorMount
   mapping?: DeviceMappingOverride
+  /** The authored zones (in-progress edit cache; not the hardware truth). */
+  zones?: Zone[]
+  /** The authored SEN0609 band (kept app-side; no registers written in Phase 3). */
+  band?: BandConfig
 }
 
 interface PersistedStore {
@@ -73,6 +81,14 @@ export class Persistence {
     return this.store.devices[deviceId]?.mapping
   }
 
+  getZones(deviceId: string): Zone[] | undefined {
+    return this.store.devices[deviceId]?.zones
+  }
+
+  getBand(deviceId: string): BandConfig | undefined {
+    return this.store.devices[deviceId]?.band
+  }
+
   /** All mapping overrides, keyed by device id. */
   getMappings(): Record<string, DeviceMappingOverride> {
     const out: Record<string, DeviceMappingOverride> = {}
@@ -88,6 +104,14 @@ export class Persistence {
 
   setMapping(deviceId: string, mapping: DeviceMappingOverride): void {
     this.upsert(deviceId, (rec) => ({ ...rec, mapping }))
+  }
+
+  setZones(deviceId: string, zones: Zone[]): void {
+    this.upsert(deviceId, (rec) => ({ ...rec, zones }))
+  }
+
+  setBand(deviceId: string, band: BandConfig): void {
+    this.upsert(deviceId, (rec) => ({ ...rec, band }))
   }
 
   private upsert(deviceId: string, fn: (rec: DeviceRecord) => DeviceRecord): void {

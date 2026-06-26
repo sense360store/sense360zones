@@ -23,8 +23,15 @@ drop geometry the firmware cannot represent.
 
 **Implemented in Phase 0:** `src/domain/profile.ts` — `resolveProfile(zones)`
 returns `'native' | 'polygon'` plus human-readable reasons NATIVE is unavailable.
-Not yet surfaced in the UI (Phase 0 makes no user-visible change); Phase 3
-enforces the native constraints and Phase 4 drives the profile-switch UX.
+Not yet surfaced in the UI (Phase 0 makes no user-visible change).
+
+**Updated in Phase 3:** `resolveProfile(zones, mount)` is now mount-aware and
+delegates to `nativeViolations` in `src/domain/native.ts`, the single eligibility
+check shared with the write path. Eligibility is judged in the sensor frame
+(zone rotation combined with the mount boresight), which subsumes the earlier
+`rot === 0` right-angle defect. The resolver is surfaced in the UI: the editor
+shows the active profile and blocks Apply with the specific reasons. Phase 4
+drives the profile-switch UX for the polygon path.
 
 ## 3.2 How POLYGON zones become entities — generated config + runtime preview
 

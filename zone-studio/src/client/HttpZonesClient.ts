@@ -76,7 +76,17 @@ export class HttpZonesClient implements ZonesClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(config),
     })
-    if (!res.ok) throw new Error(`writeConfig failed: ${res.status}`)
+    if (!res.ok) {
+      // Prefer the server's reason (e.g. the native violations) over a bare status.
+      let detail = `writeConfig failed: ${res.status}`
+      try {
+        const body = (await res.json()) as { error?: string }
+        if (body?.error) detail = body.error
+      } catch {
+        // No JSON body; keep the status-based message.
+      }
+      throw new Error(detail)
+    }
   }
 
   streamTargets(deviceId: string, onSample: TargetListener): Unsubscribe {

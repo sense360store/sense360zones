@@ -4,6 +4,44 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-26
+
+### Added
+
+- Native LD2450 zone apply. Draw up to three axis-aligned rectangles under one
+  mode, hit Apply, and the backend writes the per-zone region numbers and the
+  global zone_type select on the device, then reads them back to confirm the
+  device accepted the values. The per-zone target count and presence entities
+  react to the new regions.
+- Device-truth read and Revert. The backend reconstructs zones from the live
+  region entities and the zone_type select, so Revert returns the editor to what
+  the hardware actually holds, and the dirty indicator reflects the true
+  difference between the editor and the device.
+- Apply guardrails. The editor surfaces the active profile and, when a set cannot
+  go to the device natively, the specific reasons (more than three zones, a
+  rotated or polygon zone, mixed modes, a region out of range, overlapping
+  regions), and blocks Apply rather than dropping geometry.
+- Region geometry and validation. A room to sensor transform and a region mapping
+  with millimetre output, plus a single native constraint check shared by the
+  profile resolver and the write path.
+- Persistence of the authored zones and the SEN0609 band, alongside the existing
+  mount and mapping. The device remains the source of truth for Revert.
+
+### Fixed
+
+- The right-angle defect in profile resolution. Eligibility is now judged in the
+  sensor frame, combining the zone rotation with the mount boresight, so a
+  rectangle at 90, 180, or 270 degrees is native-eligible rather than forced onto
+  the polygon path, and the boresight is no longer ignored.
+
+### Notes
+
+- LD2450 native zones only. SEN0609 settings stay editable and persist app side;
+  no SEN0609 registers are written to a device, and its live presence is not
+  streamed yet. Both belong to later phases.
+- Some LD2450 firmware does not retain zones across a power cycle. That is a
+  firmware quirk, not an add-on fault. See DOCS.md for the workaround.
+
 ## [0.2.0] - 2026-06-25
 
 ### Added
@@ -58,5 +96,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Multi architecture image build (aarch64, amd64, armv7) and continuous
   integration.
 
+[0.3.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.1.0

@@ -1,17 +1,22 @@
 /*
- * Coordinate and unit conversions for live LD2450 samples.
+ * Coordinate and unit conversions for the LD2450 path.
  *
  * The LD2450 reports a target as an (x, y) pair in its own sensor frame, in
  * millimetres by default. The canvas works in the Phase 0 room frame: metres,
  * sensor origin at the coordinate origin, +y pointing away from the sensor into
  * the room, +x to its right. `MockDataProvider` emits targets in exactly that
- * frame with the default mount (origin 0,0, boresight 0), so with that mount
- * these conversions are the identity and the canvas behaves identically.
+ * frame with the default mount (origin 0,0, boresight 0), so with that mount the
+ * transform is the identity and the canvas behaves identically.
  *
- * This is the only place units and the sensor->room transform are applied; the
- * provider feeds raw entity values straight through here before emitting a frame.
+ * `toMetres` (raw entity value -> metres) is an HA-units concern and lives here,
+ * the only place units are applied on the read path. The sensor<->room transform
+ * itself lives in `src/domain/native.ts` because the frontend profile resolver
+ * needs it too (the frontend cannot import from `server/`); this module re-exports
+ * it so the backend keeps one import surface and there is one coordinate
+ * convention, not two. The inverse (room to sensor) and the metres-to-millimetre
+ * region mapping live alongside it there.
  */
-import type { Point, SensorMount } from '../../src/domain/types'
+export { roomToSensor, sensorToRoom } from '../../src/domain/native'
 
 /**
  * Convert a raw entity value to metres using its Home Assistant
@@ -47,17 +52,9 @@ export function toMetres(value: number, unit: string | undefined): number {
 }
 
 /**
- * Transform a point from the sensor frame to the room frame using the device
- * mount: rotate by the boresight, then translate by the sensor origin. With the
- * default mount (origin 0,0, boresight 0) this returns the point unchanged, which
- * is the convention `MockDataProvider` and the canvas already use.
+ * Convert a metre value to integer millimetres for a device region register,
+ * the inverse of `toMetres` for the default millimetre unit.
  */
-export function sensorToRoom(p: Point, mount: SensorMount): Point {
-  const a = (mount.boresight * Math.PI) / 180
-  const cos = Math.cos(a)
-  const sin = Math.sin(a)
-  return {
-    x: mount.origin.x + p.x * cos - p.y * sin,
-    y: mount.origin.y + p.x * sin + p.y * cos,
-  }
+export function toMillimetres(value: number): number {
+  return Math.round(value * 1000)
 }

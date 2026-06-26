@@ -1,20 +1,28 @@
 /*
- * HaDataProvider — the real, read-only data provider.
+ * HaDataProvider — the real Home Assistant data provider.
  *
  * It satisfies the same `DataProvider` contract as `MockDataProvider`, so the
- * routes and the frontend cannot tell which provider is wired. It connects to
- * the Home Assistant WebSocket API, discovers ESPHome devices and entities, maps
- * them onto the Room/Device/Sensor model, and streams live LD2450 targets through
- * the existing `subscribeTargets` contract, in the same room frame and metres
- * that `MockDataProvider` emits.
+ * routes and the frontend cannot tell which provider is wired. It connects to the
+ * Home Assistant WebSocket API, discovers ESPHome devices and entities, maps them
+ * onto the Room/Device/Sensor model, streams live LD2450 targets, and — new in
+ * Phase 3 — reads and writes the LD2450's native zone regions.
  *
- * Phase 2 is read-only: nothing here writes to a device. `writeConfig` persists
- * only the mount (calibration) and keeps zones/band in memory for the session.
- * The apply path, zone persistence, and SEN0609 live presence belong to later
- * phases (see ROADMAP.md).
+ * The device is the source of truth. `readConfig` reconstructs zones from the live
+ * region entities and the zone_type select; `writeConfig` validates a set against
+ * the native constraints, writes the region numbers and the mode, then reads back
+ * to confirm the device accepted them. The persisted record holds the authored
+ * edit, the mount, and the SEN0609 band, but never overrides what the hardware
+ * reports on a read. SEN0609 registers are not written in this phase (see ROADMAP).
  */
+import {
+  MAX_NATIVE_ZONES,
+  nativeRegion,
+  nativeViolations,
+  regionToRect,
+  type NativeRegion,
+} from '../../src/domain/native'
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../../src/domain/constants'
-import type { BandConfig, Point, Room, Sensor, SensorMount, Target, Zone } from '../../src/domain/types'
+import type { BandConfig, Point, Room, Sensor, SensorMount, Target, Zone, ZoneType } from '../../src/domain/types'
 import { resolveMapping } from '../ha/detect'
 import { sensorToRoom, toMetres } from '../ha/frame'
 import { HaWsClient, type ConnectionState, type Logger } from '../ha/HaWsClient'
@@ -26,6 +34,7 @@ import {
   type EntityRegistryEntry,
   type HassState,
   type StateChangedEvent,
+  type ZoneNumberRoles,
 } from '../ha/types'
 import { Persistence } from '../persistence'
 import type { DataProvider, DeviceConfig, TargetListener, Unsubscribe } from './DataProvider'
@@ -46,6 +55,9 @@ const TARGET_COLORS = ['var(--green)', '#2d8fff', '#e0922a']
 /** Trail length, matching the mock so the canvas renders identical motion trails. */
 const TRAIL_MAX = 16
 
+/** The global filter mode an LD2450 applies to all of its regions at once. */
+type ZoneMode = ZoneType | 'none'
+
 export interface HaDataProviderOptions {
   wsUrl: string
   token: string
@@ -54,12 +66,6 @@ export interface HaDataProviderOptions {
   reconnectBaseMs?: number
   reconnectMaxMs?: number
   timeoutMs?: number
-}
-
-/** The in-memory (session) zone/band config for a device. Not persisted in Phase 2. */
-interface DeviceWorking {
-  zones: Zone[]
-  band: BandConfig
 }
 
 export class HaDataProvider implements DataProvider {
@@ -71,8 +77,6 @@ export class HaDataProvider implements DataProvider {
   private states = new Map<string, HassState>()
   private mappings = new Map<string, DeviceMapping>()
   private rooms: Room[] = []
-  /** Session zone/band per device. Phase 3 persists these and writes them to hardware. */
-  private working = new Map<string, DeviceWorking>()
 
   constructor(opts: HaDataProviderOptions) {
     this.logger = opts.logger ?? noopLogger
@@ -146,7 +150,6 @@ export class HaDataProvider implements DataProvider {
         roomsById.set(roomId, room)
       }
 
-      if (!this.working.has(dev.id)) this.working.set(dev.id, { zones: [], band: clone(DEFAULT_BAND) })
       const mount = this.persistence.getMount(dev.id) ?? clone(DEFAULT_MOUNT)
       room.devices.push({ id: dev.id, name: deviceName(dev), sensors: [this.buildSensor(dev.id, mapping, mount)] })
     }
@@ -157,17 +160,84 @@ export class HaDataProvider implements DataProvider {
   }
 
   async readConfig(deviceId: string): Promise<DeviceConfig> {
-    const work = this.working.get(deviceId) ?? { zones: [], band: clone(DEFAULT_BAND) }
     const mount = this.persistence.getMount(deviceId) ?? clone(DEFAULT_MOUNT)
-    return { zones: clone(work.zones), band: clone(work.band), mount }
+    const mapping = this.mappings.get(deviceId)
+
+    // LD2450 with region entities: the device is the truth. Re-read live state and
+    // reconstruct the zones, so Revert reflects the hardware, not the edit cache.
+    if (mapping && mapping.kind === 'ld2450' && mapping.roles.zones && mapping.roles.zoneType) {
+      const states = await this.refreshStates()
+      return {
+        zones: this.reconstructZones(deviceId, mapping, mount, states),
+        band: clone(this.persistence.getBand(deviceId) ?? DEFAULT_BAND),
+        mount,
+      }
+    }
+
+    // SEN0609, or an LD2450 without region entities: nothing to read from hardware
+    // in this phase, so fall back to the persisted edit and band.
+    return {
+      zones: clone(this.persistence.getZones(deviceId) ?? []),
+      band: clone(this.persistence.getBand(deviceId) ?? DEFAULT_BAND),
+      mount,
+    }
   }
 
   async writeConfig(deviceId: string, config: DeviceConfig): Promise<void> {
-    // Read-only with respect to hardware. Keep the authored zones/band in memory
-    // so the session is consistent, but do not write them to the device or disk
-    // (the apply path and zone persistence are Phase 3). Persist the mount only.
-    this.working.set(deviceId, { zones: clone(config.zones), band: clone(config.band) })
     if (config.mount) this.persistence.setMount(deviceId, config.mount)
+    const mount = config.mount ?? this.persistence.getMount(deviceId) ?? clone(DEFAULT_MOUNT)
+    const mapping = this.mappings.get(deviceId)
+
+    const nativeCapable = mapping && mapping.kind === 'ld2450' && mapping.roles.zones && mapping.roles.zoneType
+    if (!nativeCapable) {
+      // SEN0609, or an LD2450 without region entities: keep the authored config
+      // app-side. No registers are written to a SEN0609 in this phase.
+      this.persistence.setZones(deviceId, clone(config.zones))
+      this.persistence.setBand(deviceId, clone(config.band))
+      return
+    }
+
+    // Validate before touching hardware. A bad write changes detection in a real
+    // room, so refuse the whole set rather than write a partial result.
+    const violations = nativeViolations(config.zones, mount)
+    if (violations.length) {
+      throw new Error(`Cannot apply zones natively: ${violations.join('; ')}`)
+    }
+
+    await this.client.connect()
+    const zoneRoles = mapping!.roles.zones!
+    const selectId = mapping!.roles.zoneType!
+
+    // Match the model's mode to one of the select's own options, case-insensitively
+    // (option strings vary by component build, so they are not hardcoded).
+    const states = await this.refreshStates()
+    const options = (states.get(selectId)?.attributes?.options as string[] | undefined) ?? []
+    const mode: ZoneMode = config.zones.length ? config.zones[0].type : 'none'
+    const option = optionForMode(options, mode)
+    if (!option) {
+      throw new Error(`The zone_type select has no option for "${mode}" (options: ${options.join(', ') || 'none'})`)
+    }
+
+    // Write each used slot; clear the rest so a removed zone does not linger.
+    const regions = config.zones.map((z) => nativeRegion(z, mount)!)
+    for (let slot = 0; slot < MAX_NATIVE_ZONES; slot++) {
+      const roles = zoneRoles[slot]
+      if (!roles) continue
+      const region = regions[slot] ?? CLEARED_REGION
+      await this.setNumber(roles.x1, region.x1)
+      await this.setNumber(roles.y1, region.y1)
+      await this.setNumber(roles.x2, region.x2)
+      await this.setNumber(roles.y2, region.y2)
+    }
+    await this.client.callService('select', 'select_option', { option }, { entity_id: selectId })
+
+    // Read back and confirm the device reflects exactly what was sent.
+    await this.confirmWrite(zoneRoles, regions, selectId, option)
+
+    // Persist the applied set as the new baseline record.
+    this.persistence.setZones(deviceId, clone(config.zones))
+    this.persistence.setBand(deviceId, clone(config.band))
+    this.logger.info({ deviceId, zones: config.zones.length, mode }, 'applied native LD2450 zones')
   }
 
   subscribeTargets(deviceId: string, onSample: TargetListener): Unsubscribe {
@@ -217,7 +287,6 @@ export class HaDataProvider implements DataProvider {
   // ---- internals ---------------------------------------------------------
 
   private buildSensor(deviceId: string, mapping: DeviceMapping, mount: SensorMount): Sensor {
-    const work = this.working.get(deviceId) ?? { zones: [], band: clone(DEFAULT_BAND) }
     if (mapping.kind === 'ld2450') {
       return {
         id: `${deviceId}:ld2450`,
@@ -226,7 +295,7 @@ export class HaDataProvider implements DataProvider {
         mount: clone(mount),
         fovHalf: LD2450_FOV_HALF,
         range: LD2450_RANGE,
-        zones: clone(work.zones),
+        zones: this.reconstructZones(deviceId, mapping, mount, this.states),
       }
     }
     return {
@@ -234,11 +303,83 @@ export class HaDataProvider implements DataProvider {
       name: 'DFRobot SEN0609',
       kind: 'sen0609',
       mount: clone(mount),
-      band: clone(work.band),
+      band: clone(this.persistence.getBand(deviceId) ?? DEFAULT_BAND),
     }
   }
 
-  /** Recompute the target list for a device from the latest mapped entity values. */
+  /** Pull a fresh snapshot of all entity states and cache it. */
+  private async refreshStates(): Promise<Map<string, HassState>> {
+    await this.client.connect()
+    const states = await this.client.command<HassState[]>({ type: 'get_states' })
+    this.states = new Map(states.map((s) => [s.entity_id, s]))
+    return this.states
+  }
+
+  /**
+   * Reconstruct an LD2450's zones from its region numbers and the zone_type select.
+   * The mode names the type of every zone; each non-degenerate region becomes a
+   * RectZone (the inverse of the write path). A disabled mode means no active zones.
+   */
+  private reconstructZones(
+    deviceId: string,
+    mapping: DeviceMapping,
+    mount: SensorMount,
+    states: Map<string, HassState>,
+  ): Zone[] {
+    if (mapping.kind !== 'ld2450' || !mapping.roles.zones || !mapping.roles.zoneType) {
+      return clone(this.persistence.getZones(deviceId) ?? [])
+    }
+    const select = states.get(mapping.roles.zoneType)
+    const mode = select ? modeFromOption(select.state) : 'none'
+    if (mode === 'none') return []
+
+    const zones: Zone[] = []
+    mapping.roles.zones.forEach((roles, i) => {
+      const region = readRegion(roles, states)
+      if (!region) return
+      if (region.x1 === region.x2 || region.y1 === region.y2) return // a cleared slot
+      zones.push(regionToRect(region, mount, { id: `${deviceId}:zone${i + 1}`, name: `Zone ${i + 1}`, type: mode }))
+    })
+    return zones
+  }
+
+  private async setNumber(entityId: string | undefined, valueMm: number): Promise<void> {
+    if (!entityId) return
+    await this.client.callService('number', 'set_value', { value: valueMm }, { entity_id: entityId })
+  }
+
+  /** Read the device back after a write and throw if any value did not take. */
+  private async confirmWrite(
+    zoneRoles: ZoneNumberRoles[],
+    regions: NativeRegion[],
+    selectId: string,
+    option: string,
+  ): Promise<void> {
+    const states = await this.refreshStates()
+
+    const sel = states.get(selectId)
+    if (!sel || sel.state.toLowerCase() !== option.toLowerCase()) {
+      throw new Error(`The device did not accept the zone mode (wanted "${option}", got "${sel?.state ?? 'none'}")`)
+    }
+
+    zoneRoles.forEach((roles, slot) => {
+      const region = regions[slot] ?? CLEARED_REGION
+      this.confirmNumber(states, roles.x1, region.x1)
+      this.confirmNumber(states, roles.y1, region.y1)
+      this.confirmNumber(states, roles.x2, region.x2)
+      this.confirmNumber(states, roles.y2, region.y2)
+    })
+  }
+
+  private confirmNumber(states: Map<string, HassState>, entityId: string | undefined, expectedMm: number): void {
+    if (!entityId) return
+    const st = states.get(entityId)
+    const got = st ? Math.round(toMetres(Number(st.state), st.attributes.unit_of_measurement) * 1000) : NaN
+    if (got !== expectedMm) {
+      throw new Error(`The device did not accept ${entityId} (wanted ${expectedMm}, got ${st?.state ?? 'none'})`)
+    }
+  }
+
   private buildTargets(
     mapping: DeviceMapping,
     mount: SensorMount,
@@ -288,6 +429,46 @@ export class HaDataProvider implements DataProvider {
   }
 }
 
+/** The all-zero region written to an unused zone slot to clear it. */
+const CLEARED_REGION: NativeRegion = { x1: 0, y1: 0, x2: 0, y2: 0 }
+
 function deviceName(dev: DeviceRegistryEntry): string {
   return dev.name_by_user || dev.name || dev.id
+}
+
+/** Read one zone slot's four region numbers (any unit) into a normalised region. */
+function readRegion(roles: ZoneNumberRoles, states: Map<string, HassState>): NativeRegion | null {
+  const read = (id?: string): number | null => {
+    if (!id) return null
+    const st = states.get(id)
+    if (!st || UNAVAILABLE_STATES.has(st.state.toLowerCase())) return null
+    const v = Number(st.state)
+    if (!Number.isFinite(v)) return null
+    return Math.round(toMetres(v, st.attributes.unit_of_measurement) * 1000)
+  }
+  const x1 = read(roles.x1)
+  const y1 = read(roles.y1)
+  const x2 = read(roles.x2)
+  const y2 = read(roles.y2)
+  if (x1 === null || y1 === null || x2 === null || y2 === null) return null
+  return { x1: Math.min(x1, x2), y1: Math.min(y1, y2), x2: Math.max(x1, x2), y2: Math.max(y1, y2) }
+}
+
+/** Map a zone_type select option to a mode (unknown labels read as no zones). */
+function modeFromOption(option: string): ZoneMode {
+  const o = option.toLowerCase()
+  if (/inside|detection/.test(o)) return 'detection'
+  if (/filter|exclude|outside/.test(o)) return 'exclusion'
+  return 'none'
+}
+
+/** Find the select option that expresses a mode, case-insensitively. */
+function optionForMode(options: string[], mode: ZoneMode): string | undefined {
+  const pattern =
+    mode === 'detection'
+      ? /inside|detection/i
+      : mode === 'exclusion'
+        ? /filter|exclude|outside/i
+        : /disabled|off|none/i
+  return options.find((o) => pattern.test(String(o)))
 }
