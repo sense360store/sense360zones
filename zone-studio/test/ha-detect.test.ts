@@ -63,6 +63,64 @@ describe('detectKindAndRoles', () => {
   })
 })
 
+describe('LD2450 zone detection', () => {
+  const targets = ['sensor.node_target_1_x', 'sensor.node_target_1_y']
+  const typeSelect = (entity_id: string): Record<string, HassState> => ({
+    [entity_id]: { entity_id, state: 'Disabled', attributes: { options: ['Disabled', 'Detection', 'Filter'] } },
+  })
+
+  it('detects the per-zone region numbers and the zone_type select', () => {
+    const ids = [
+      ...targets,
+      'number.node_zone_1_x1',
+      'number.node_zone_1_y1',
+      'number.node_zone_1_x2',
+      'number.node_zone_1_y2',
+      'number.node_zone_2_x1',
+      'select.node_zone_type',
+    ]
+    const res = detectKindAndRoles(ids, stateMap(typeSelect('select.node_zone_type')))
+    expect(res?.kind).toBe('ld2450')
+    expect(res?.roles.zones?.[0]).toEqual({
+      x1: 'number.node_zone_1_x1',
+      y1: 'number.node_zone_1_y1',
+      x2: 'number.node_zone_1_x2',
+      y2: 'number.node_zone_1_y2',
+    })
+    expect(res?.roles.zones?.[1]).toEqual({ x1: 'number.node_zone_2_x1' })
+    expect(res?.roles.zoneType).toBe('select.node_zone_type')
+  })
+
+  it('recognises the zone_type select by its option set when the id is generic', () => {
+    const ids = [...targets, 'select.node_region_mode']
+    const res = detectKindAndRoles(ids, stateMap(typeSelect('select.node_region_mode')))
+    expect(res?.roles.zoneType).toBe('select.node_region_mode')
+  })
+
+  it('does not mistake an unrelated select for the zone_type', () => {
+    const ids = [...targets, 'select.node_fan_preset']
+    const res = detectKindAndRoles(
+      ids,
+      stateMap({
+        'select.node_fan_preset': {
+          entity_id: 'select.node_fan_preset',
+          state: 'Auto',
+          attributes: { options: ['Auto', 'Low', 'High'] },
+        },
+      }),
+    )
+    expect(res?.roles.zoneType).toBeUndefined()
+  })
+
+  it('lets an override set the zone roles where auto-detection is silent', () => {
+    const res = resolveMapping('dev', targets, noState, {
+      roles: { zoneType: 'select.custom_type', zones: [{ x1: 'number.a' }] },
+    })
+    expect(res?.roles.zoneType).toBe('select.custom_type')
+    expect(res?.roles.zones?.[0]).toEqual({ x1: 'number.a' })
+  })
+})
+
 describe('resolveMapping with an override', () => {
   const ids = ['sensor.node_target_1_x', 'sensor.node_target_1_y']
 

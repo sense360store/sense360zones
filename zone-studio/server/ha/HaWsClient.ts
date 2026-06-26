@@ -140,6 +140,20 @@ export class HaWsClient {
     })
   }
 
+  /**
+   * Call a Home Assistant service and resolve with its result. The apply path uses
+   * this to write `number.set_value` and `select.select_option` onto the device's
+   * region entities. `target` carries the entity_id (or area/device) selector.
+   */
+  callService(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    target: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.command({ type: 'call_service', domain, service, service_data: data, target })
+  }
+
   /** Send a command and resolve with its `result` payload (rejects on failure). */
   command<T = unknown>(payload: Record<string, unknown>): Promise<T> {
     return new Promise<T>((resolve, reject) => {

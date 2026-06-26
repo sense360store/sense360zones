@@ -21,7 +21,7 @@ a server side `MockDataProvider` reproduces the simulation. The frontend gains a
 transparent to the UI. Ingress, multi architecture image builds, and CI are set
 up here. No hardware is touched.
 
-## Phase 2 — Home Assistant data provider (this release)
+## Phase 2 — Home Assistant data provider (done)
 
 Replace only the backend's data provider with one that talks to Home Assistant.
 An `HaDataProvider` connects to the Home Assistant WebSocket API, discovers
@@ -31,11 +31,18 @@ a real room and device picker, honest connection states, and persisted mount. It
 is read only, and is verified against a WebSocket simulator since the loop cannot
 reach real hardware. The routes and the client contract do not change.
 
-## Phase 3 — Apply path
+## Phase 3 — Apply path (this release)
 
-Write authored zones to the device and enforce the native LD2450 constraints (at
-most three axis aligned rectangles under one mode), falling back to the polygon
-profile otherwise (DECISIONS.md §3.1).
+Write authored zones to the LD2450 and enforce the native constraints (at most
+three axis aligned rectangles in the sensor frame under one mode), falling back to
+the polygon profile otherwise (DECISIONS.md §3.1). `writeConfig` validates a set,
+writes the region numbers and the zone_type select, and reads them back to
+confirm; `readConfig` reconstructs zones from the device, so the device is the
+source of truth for Revert. The editor surfaces the active profile and blocks
+Apply with specific reasons for a set that cannot go native. Eligibility is judged
+in the sensor frame, combining zone rotation with the mount boresight, which fixes
+the earlier right-angle defect. Verified against the WebSocket simulator; the live
+check against a real LD2450 is a manual step after merge.
 
 ## Phase 4 — Polygon profile
 

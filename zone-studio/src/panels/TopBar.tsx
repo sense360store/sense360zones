@@ -1,7 +1,7 @@
 import type { ConnectionState } from '../store/store'
 import { css } from '../lib/css'
-import { isDirty } from '../store/store'
 import { store, useEditorState } from '../store/hooks'
+import { applyView } from './ApplyGuardrail'
 
 const applyStyleOn =
   'height:34px;padding:0 18px;border-radius:8px;border:1px solid var(--green);background:var(--green);color:#fff;font-family:Murecho;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 0 16px var(--greenSoft);'
@@ -27,7 +27,8 @@ function connStatus(state: ConnectionState): { label: string; color: string; pul
 
 export function TopBar() {
   const s = useEditorState()
-  const dirty = isDirty(s)
+  const view = applyView(s)
+  const dirty = view.dirty
   const status = connStatus(s.connection)
   const activeRoom = s.rooms.find((r) => r.id === s.activeRoomId)
   const devices = activeRoom?.devices ?? []
@@ -114,21 +115,31 @@ export function TopBar() {
           {themeIcon}
         </span>
       </div>
-      {dirty && (
+      {view.error && (
+        <span title={view.error} style={css('font-size:11.5px;color:var(--excl);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;')}>
+          {view.error}
+        </span>
+      )}
+      {!view.error && dirty && (
         <span style={css('font-size:11.5px;color:#e0922a;display:flex;align-items:center;gap:6px;')}>
           <span style={css('width:6px;height:6px;border-radius:50%;background:#e0922a;')}></span>Unsaved
         </span>
       )}
       <button
-        onClick={() => store.revert()}
+        onClick={() => void store.revert()}
         style={css(
           'height:34px;padding:0 16px;border-radius:8px;border:1px solid var(--bd);background:transparent;color:var(--mut);font-family:Murecho;font-size:13px;font-weight:500;cursor:pointer;',
         )}
       >
         Revert
       </button>
-      <button onClick={() => store.apply()} style={css(dirty ? applyStyleOn : applyStyleOff)}>
-        Apply to sensors
+      <button
+        onClick={() => void store.apply()}
+        disabled={!view.canApply}
+        title={view.resolution.reasons.length ? view.resolution.reasons.join('\n') : 'Apply to sensors'}
+        style={css(view.canApply ? applyStyleOn : applyStyleOff)}
+      >
+        {view.applying ? 'Applying…' : 'Apply to sensors'}
       </button>
     </div>
   )

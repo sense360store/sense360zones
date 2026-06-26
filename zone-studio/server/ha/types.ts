@@ -108,9 +108,18 @@ export interface TargetSlotRoles {
   speed?: string
 }
 
+/** The four region-corner `number` entities for one LD2450 zone slot. */
+export interface ZoneNumberRoles {
+  x1?: string
+  y1?: string
+  x2?: string
+  y2?: string
+}
+
 /**
  * Which entity plays which role for a device. For an LD2450 this is the per
- * target x/y/speed entity ids; for a SEN0609 it is the presence and optional
+ * target x/y/speed entity ids, the per-zone region `number` entities, and the
+ * global `zone_type` select; for a SEN0609 it is the presence and optional
  * distance entity ids.
  */
 export interface EntityRoles {
@@ -118,6 +127,10 @@ export interface EntityRoles {
   targets: TargetSlotRoles[]
   presence?: string
   distance?: string
+  /** LD2450 zone region slots, index 0..2 for zones 1..3 (the apply path). */
+  zones?: ZoneNumberRoles[]
+  /** The LD2450 `zone_type` select that sets the global filter mode. */
+  zoneType?: string
 }
 
 /** A fully resolved mapping for one device. */

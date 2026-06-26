@@ -1,6 +1,7 @@
 import { css } from '../lib/css'
 import { occupancyCounts, zoneMeta } from '../domain/geometry'
 import { store, useEditorState } from '../store/hooks'
+import { ApplyGuardrail, applyView } from './ApplyGuardrail'
 
 interface LayerRow {
   key: 'ld' | 'sen'
@@ -141,6 +142,9 @@ export function LeftPanel() {
           Draw tools live on the canvas toolbar. SEN0609 has no drawable zones — only its radial band.
         </div>
       </div>
+
+      {/* Active profile and the reasons Apply is blocked, pinned below the list. */}
+      <ApplyGuardrail view={applyView(s)} />
     </div>
   )
 }

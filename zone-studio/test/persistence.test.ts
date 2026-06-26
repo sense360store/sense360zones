@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Persistence, recordPath } from '../server/persistence'
-import type { SensorMount } from '../src/domain/types'
+import type { BandConfig, SensorMount, Zone } from '../src/domain/types'
 
 const dirs: string[] = []
 function tempDir(): string {
@@ -51,6 +51,22 @@ describe('Persistence', () => {
     const b = new Persistence(dir)
     expect(b.getMount('dev_ld')).toEqual(mount)
     expect(b.getMapping('dev_ld')).toEqual({ kind: 'sen0609' })
+  })
+
+  it('round-trips the authored zones (the in-progress edit) and band', () => {
+    const dir = tempDir()
+    const zones: Zone[] = [{ id: 'z1', name: 'Desk', type: 'detection', shape: 'rect', cx: 0, cy: 2, w: 1, h: 1, rot: 0 }]
+    const editBand: BandConfig = { minR: 0.5, maxR: 3, beam: 40, trigSens: 5, sustSens: 4, reducedRange: 0.2 }
+    const a = new Persistence(dir)
+    a.setZones('dev_ld', zones)
+    a.setBand('dev_ld', editBand)
+    a.setMount('dev_ld', mount)
+
+    const b = new Persistence(dir)
+    expect(b.getZones('dev_ld')).toEqual(zones)
+    expect(b.getBand('dev_ld')).toEqual(editBand)
+    // The authored edit is independent of the mount, which still round-trips.
+    expect(b.getMount('dev_ld')).toEqual(mount)
   })
 
   it('creates the data directory on first write and returns empty before any write', () => {

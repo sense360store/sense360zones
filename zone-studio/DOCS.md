@@ -14,10 +14,15 @@ ESPHome devices and entities, lists the rooms and devices it finds in the top ba
 picker, and tracks live LD2450 targets on the canvas as people move. Pick a room
 and a device to view, and the canvas follows that device.
 
-This release is read only. It does not write zones, bands, or any setting to a
-device; drawing and tuning come in a later phase. The DFRobot SEN0609 is
-discovered and its range band is shown as configured, but its live presence and
-distance are not streamed yet.
+For an LD2450 you can draw detection and exclusion zones on the canvas and apply
+them to the device. Apply writes the zone regions and the global mode to the
+sensor, then reads them back to confirm the device accepted them, so the per zone
+target count and presence entities react to your zones. Revert reads the device
+back, so it returns the editor to what the hardware currently holds.
+
+The DFRobot SEN0609 is discovered and its range band stays editable and saved with
+the add-on, but no SEN0609 settings are written to the device yet, and its live
+presence and distance are not streamed yet. Both come in a later phase.
 
 ## Connection states
 
@@ -33,14 +38,39 @@ message when there is nothing to draw:
 
 The add-on never shows simulated data in place of a real connection.
 
+## Applying zones to an LD2450
+
+The LD2450 hosts its zones in hardware, and that hardware is fixed and small: at
+most three rectangular zones, all axis aligned to the sensor, under one global
+mode (all detection, or all exclusion). When your zone set fits that shape the
+editor shows the native profile and Apply is enabled. Apply writes the zone
+regions and the mode to the device, then reads them back to confirm.
+
+When a set does not fit, the editor blocks Apply and lists the reasons rather than
+silently dropping anything. The reasons are one or more of: more than three zones,
+a rotated or polygon zone, a mix of detection and exclusion, a region outside the
+sensor range, or two zones that overlap. Adjust the zones until the reasons clear,
+then Apply. Support for these richer zone sets comes in a later phase.
+
+Revert reads the device back and discards your edits, and the unsaved indicator
+reflects the real difference between the editor and the device.
+
+### Zones not retained across a power cycle
+
+Some LD2450 firmware does not keep its zones after the sensor loses power. This is
+a firmware quirk, not a fault in the add-on. If it affects your sensor, re-apply
+the zones from the editor after the device comes back, or save the applied zones
+through your ESPHome configuration so they are restored on boot.
+
 ## Correcting a misdetected device
 
 Detection is heuristic. It identifies an LD2450 by its per target x and y
-coordinate entities, and a SEN0609 by its presence sensor. If a device is read
-wrongly, you can override it with a record under the add-on data directory
-(`/data/zone-studio.json`) that forces the device kind and the entity roles.
-Auto-detection only seeds the mapping where there is no override, so your
-correction persists across restarts.
+coordinate entities, its per zone region numbers, and a zone_type select, and a
+SEN0609 by its presence sensor. If a device is read wrongly, you can override it
+with a record under the add-on data directory (`/data/zone-studio.json`) that
+forces the device kind and the entity roles, including the zone region numbers and
+the zone_type select used by the apply path. Auto-detection only seeds the mapping
+where there is no override, so your correction persists across restarts.
 
 ## Installation
 

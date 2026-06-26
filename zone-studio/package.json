@@ -1,7 +1,7 @@
 {
   "name": "sense360-zone-studio",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Sense360 Zone Studio — radar/sensor zone configuration add-on",
   "engines": {

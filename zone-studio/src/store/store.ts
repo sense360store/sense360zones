@@ -59,8 +59,12 @@ export interface EditorState {
   targets: Target[]
   draft: { pts: Point[] } | null
   cursor: Point | null
-  // dirty tracking: JSON snapshot of the last applied { zones, band }
+  // dirty tracking: JSON snapshot of the last config read from the device
   saved: string
+  /** Apply lifecycle: 'applying' while a write+read-back is in flight. */
+  applyState: 'idle' | 'applying'
+  /** The last apply/revert error, surfaced near the Apply button. */
+  applyError: string | null
 }
 
 /** Imperative drag handle — non-reactive, mirrors the old `this.h`. */
@@ -78,6 +82,7 @@ type Listener = () => void
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 const snapshot = (zones: Zone[], band: BandConfig): string => JSON.stringify({ zones, band })
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 /** True if the working copy differs from the last applied snapshot. */
 export function isDirty(s: EditorState): boolean {
@@ -113,6 +118,8 @@ export class ZoneStudioStore {
       draft: null,
       cursor: null,
       saved: snapshot(seed.zones, seed.band),
+      applyState: 'idle',
+      applyError: null,
     }
     this.resub(seed.activeDeviceId)
   }
@@ -149,6 +156,7 @@ export class ZoneStudioStore {
         saved: snapshot(cfg.zones, cfg.band),
         sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
         connection: 'connected',
+        applyError: null,
       })
     } catch {
       // Real failure: clear any live stream and show the offline state. Do not
@@ -258,7 +266,7 @@ export class ZoneStudioStore {
     if (!deviceId || deviceId === this.state.activeDeviceId) return
     const room = this.state.rooms.find((r) => r.devices.some((d) => d.id === deviceId))
     this.resub(deviceId)
-    this.set({ activeDeviceId: deviceId, activeRoomId: room?.id ?? this.state.activeRoomId, targets: [] })
+    this.set({ activeDeviceId: deviceId, activeRoomId: room?.id ?? this.state.activeRoomId, targets: [], applyError: null })
     void this.client
       .readConfig(deviceId)
       .then((cfg) => {
@@ -302,23 +310,56 @@ export class ZoneStudioStore {
   }
 
   // ---- apply / revert ----------------------------------------------------
-  apply() {
+  /**
+   * Write the authored config to the device, then re-read so the editor and the
+   * dirty baseline reflect exactly what the hardware now holds. A rejected write
+   * (a non-native set, or a value the device refused) leaves the edit untouched
+   * and surfaces the error.
+   */
+  async apply(): Promise<void> {
     const { zones, band, mount, activeDeviceId } = this.state
-    // Phase 2 is read-only with respect to hardware: the HA provider persists the
-    // mount (calibration) and keeps zones/band in memory. The mount rides on this
-    // payload so it round-trips. Phase 3 wires zones/band to the real device.
-    void this.client.writeConfig(activeDeviceId, {
-      zones: clone(zones),
-      band: clone(band),
-      ...(mount ? { mount } : {}),
-    })
-    this.set({ saved: snapshot(zones, band) })
+    if (!activeDeviceId) return
+    this.set({ applyState: 'applying', applyError: null })
+    try {
+      await this.client.writeConfig(activeDeviceId, {
+        zones: clone(zones),
+        band: clone(band),
+        ...(mount ? { mount } : {}),
+      })
+      const cfg = await this.client.readConfig(activeDeviceId)
+      if (this.state.activeDeviceId !== activeDeviceId) return
+      this.set({
+        zones: cfg.zones,
+        band: cfg.band,
+        mount: cfg.mount ?? this.state.mount,
+        saved: snapshot(cfg.zones, cfg.band),
+        applyState: 'idle',
+        applyError: null,
+      })
+    } catch (err) {
+      if (this.state.activeDeviceId !== activeDeviceId) return
+      this.set({ applyState: 'idle', applyError: errorMessage(err) })
+    }
   }
-  revert() {
-    this.setFn((s) => {
-      const r = JSON.parse(s.saved) as { zones: Zone[]; band: BandConfig }
-      return { zones: r.zones, band: r.band }
-    })
+
+  /** Discard edits by reading the device's current config back into the editor. */
+  async revert(): Promise<void> {
+    const deviceId = this.state.activeDeviceId
+    if (!deviceId) return
+    try {
+      const cfg = await this.client.readConfig(deviceId)
+      if (this.state.activeDeviceId !== deviceId) return
+      this.set({
+        zones: cfg.zones,
+        band: cfg.band,
+        mount: cfg.mount ?? this.state.mount,
+        saved: snapshot(cfg.zones, cfg.band),
+        applyError: null,
+      })
+    } catch (err) {
+      if (this.state.activeDeviceId !== deviceId) return
+      this.set({ applyError: errorMessage(err) })
+    }
   }
 
   // ---- drag interaction (all coordinates in metres) ----------------------

@@ -40,6 +40,9 @@ export class HaSim {
   private autoTimer: ReturnType<typeof setInterval> | null = null
   private autoAngle = 0
   readonly port: number
+  /** Entity ids whose service writes are acknowledged but ignored (a device that
+   *  refuses a value), so a read-back mismatch can be exercised. */
+  readonly frozen = new Set<string>()
 
   constructor(wss: WebSocketServer, port: number, opts: HaSimOptions) {
     this.wss = wss
@@ -65,7 +68,15 @@ export class HaSim {
   }
 
   private onMessage(client: Client, raw: string): void {
-    let msg: { id?: number; type?: string; access_token?: string }
+    let msg: {
+      id?: number
+      type?: string
+      access_token?: string
+      domain?: string
+      service?: string
+      service_data?: Record<string, unknown>
+      target?: { entity_id?: string | string[] }
+    }
     try {
       msg = JSON.parse(raw)
     } catch {
@@ -105,9 +116,38 @@ export class HaSim {
         if (typeof sub === 'number') client.subscriptions.delete(sub)
         return this.result(client, id, null)
       }
+      case 'call_service':
+        this.callService(msg.domain, msg.service, msg.service_data, msg.target)
+        return this.result(client, id, { context: { id: 'ctx' } })
       default:
         return this.result(client, id, null)
     }
+  }
+
+  /**
+   * Apply a service call to the in-memory state so a subsequent read observes it.
+   * Handles the two services the LD2450 apply path uses; attributes (unit, the
+   * select's option set) are preserved so reads round-trip.
+   */
+  private callService(
+    domain: string | undefined,
+    service: string | undefined,
+    data: Record<string, unknown> = {},
+    target: { entity_id?: string | string[] } = {},
+  ): void {
+    const entityId = Array.isArray(target.entity_id) ? target.entity_id[0] : target.entity_id
+    if (!entityId || this.frozen.has(entityId)) return
+    const attributes = this.states.get(entityId)?.attributes ?? {}
+    if (domain === 'number' && service === 'set_value') {
+      this.emitState(entityId, String(data.value), attributes)
+    } else if (domain === 'select' && service === 'select_option') {
+      this.emitState(entityId, String(data.option), attributes)
+    }
+  }
+
+  /** The current state value of an entity (tests assert what a write stored). */
+  peek(entityId: string): string | undefined {
+    return this.states.get(entityId)?.state
   }
 
   private result(client: Client, id: number, result: unknown): void {
