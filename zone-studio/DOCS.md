@@ -15,10 +15,11 @@ picker, and tracks live LD2450 targets on the canvas as people move. Pick a room
 and a device to view, and the canvas follows that device.
 
 For an LD2450 you can draw detection and exclusion zones on the canvas and apply
-them to the device. Apply writes the zone regions and the global mode to the
-sensor, then reads them back to confirm the device accepted them, so the per zone
-target count and presence entities react to your zones. Revert reads the device
-back, so it returns the editor to what the hardware currently holds.
+them. A simple set (up to three axis-aligned rectangles under one mode) goes
+straight to the sensor's zone hardware. A richer set (polygons, rotated
+rectangles, more zones, or mixed modes) is evaluated live by the add-on and
+published to Home Assistant over MQTT, and can also be exported as an ESPHome
+config to run on the device. Both paths are described below.
 
 The DFRobot SEN0609 is discovered and its range band stays editable and saved with
 the add-on, but no SEN0609 settings are written to the device yet, and its live
@@ -46,14 +47,72 @@ mode (all detection, or all exclusion). When your zone set fits that shape the
 editor shows the native profile and Apply is enabled. Apply writes the zone
 regions and the mode to the device, then reads them back to confirm.
 
-When a set does not fit, the editor blocks Apply and lists the reasons rather than
-silently dropping anything. The reasons are one or more of: more than three zones,
-a rotated or polygon zone, a mix of detection and exclusion, a region outside the
-sensor range, or two zones that overlap. Adjust the zones until the reasons clear,
-then Apply. Support for these richer zone sets comes in a later phase.
+When a set does not fit that shape, the editor switches to the polygon profile and
+explains why, rather than blocking. The reasons are one or more of: more than three
+zones, a rotated or polygon zone, a mix of detection and exclusion, a region
+outside the sensor range, or two zones that overlap. You can still apply the set;
+the polygon profile handles it a different way, described next.
 
-Revert reads the device back and discards your edits, and the unsaved indicator
-reflects the real difference between the editor and the device.
+Revert reads the source of truth back and discards your edits, and the unsaved
+indicator reflects the real difference. For a native set the source of truth is the
+hardware; for a polygon set it is the add-on's active config (see below).
+
+## Polygon zones and live occupancy
+
+The polygon profile covers everything the native profile cannot: arbitrary
+polygons, rotated rectangles, more than three zones, and a per-zone mix of
+detection and exclusion. It does not push these to the LD2450's small zone
+hardware. Instead, when you apply a polygon set the add-on does two things.
+
+First, it puts the LD2450 into report-all mode: it clears the native regions and
+disables the zone_type select, so the sensor reports every target it tracks rather
+than filtering in hardware.
+
+Second, it evaluates your zones against the live target stream in software and
+publishes occupancy to Home Assistant over MQTT. Each zone becomes an occupancy
+binary sensor, and the device gets a presence binary sensor. A target is counted
+for presence when it is inside any detection zone, or anywhere in range when there
+are no detection zones, and never when it is inside an exclusion zone, so exclusion
+zones subtract from presence. Transitions are debounced with a small on and off
+delay so a brief flicker at a zone edge does not toggle an entity.
+
+This is instant and needs no flashing. The canvas lights a zone the moment a target
+enters it, using the same evaluation that drives the published entities.
+
+The entities are published with retained discovery and an availability topic, and
+the add-on registers a last will, so if the add-on stops the entities show
+unavailable rather than disappearing. Deleting a zone removes its entity.
+
+### The MQTT integration is required
+
+Publishing the polygon zone entities needs the Home Assistant MQTT integration. If
+it is not available the canvas preview still works and the editor states that MQTT
+is required to publish the entities; the device is not failed. Install and
+configure the MQTT integration (and a broker, such as the Mosquitto broker add-on),
+then apply again.
+
+### Zones not retained without the add-on
+
+Because a polygon set is evaluated by the add-on, the occupancy entities only
+update while the add-on is running. For a version that runs on the device itself,
+generate an ESPHome config, described next.
+
+## Generate ESPHome config
+
+Generate ESPHome config turns the drawn zones into an ESPHome package for the
+TillFleisch ESPHome-HLK-LD2450 component, the durable on-device alternative to the
+live path. It produces an occupancy binary sensor per zone, mapping each zone's
+vertices into the sensor frame, and splits any non-convex zone into convex parts
+because the component requires convex zone polygons.
+
+To use it: open Generate ESPHome config, copy or download the YAML, add it to your
+LD2450 device's ESPHome configuration (set `uart_id` to match your board), and
+flash the device. On the device the component does the filtering itself, so the
+report-all mode the live path needs does not apply. Flashing is a manual step.
+
+The detection-minus-exclusion presence rule is a live-path feature; on the device
+each zone reports its own occupancy, and you can compose the presence rule with a
+Home Assistant template if you need it.
 
 ### Zones not retained across a power cycle
 

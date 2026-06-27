@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { css } from '../lib/css'
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../domain/constants'
 import { occupancyCounts, zoneMeta, zonePtsM } from '../domain/geometry'
+import { evaluateOccupancy } from '../domain/occupancy'
 import { store, useEditorState } from '../store/hooks'
 import { RING_COUNT, SPOKE_RADIUS_M, VIEWBOX_H, VIEWBOX_W } from './constants'
 import { makeProjection, svgPointFromEvent } from './projection'
@@ -16,6 +17,10 @@ export function Canvas() {
   const toPx = proj.toPx
   const atM = (e: ReactPointerEvent<SVGElement>) => proj.toM(svgPointFromEvent(e))
   const occ = occupancyCounts(s.zones, s.targets)
+  // The shared evaluator drives the live "occupied" highlight, so the canvas
+  // preview lights a zone the moment a target enters it, from the same primitive
+  // the backend uses to publish entities.
+  const occupancy = evaluateOccupancy(s.zones, s.targets)
   const selId = s.sel.kind === 'zone' ? s.sel.id : null
   const ha = (LD2450_FOV_HALF * Math.PI) / 180
 
@@ -191,6 +196,7 @@ export function Canvas() {
             const selected = z.id === selId
             const isExcl = z.type === 'exclusion'
             const cnt = occ[z.id] || 0
+            const occupied = occupancy.zones[z.id] ?? false
             // rotate handle (rect only)
             let rot = null as null | { x1: number; y1: number; x2: number; y2: number }
             if (selected && z.shape === 'rect') {
@@ -212,11 +218,18 @@ export function Canvas() {
               >
                 <polygon points={pts} fill={m.soft} stroke={m.accent} strokeWidth={selected ? 2.4 : 1.8} strokeDasharray={isExcl ? '7 5' : '0'}></polygon>
                 {isExcl && <polygon points={pts} fill="url(#hatch)"></polygon>}
+                {/* Live occupancy: light the zone the moment a target enters it. */}
+                {occupied && (
+                  <g style={css('pointer-events:none;')}>
+                    <polygon points={pts} fill={m.accent} opacity={isExcl ? '0.16' : '0.24'}></polygon>
+                    <polygon points={pts} fill="none" stroke={m.accent} strokeWidth="3.4" opacity="0.45"></polygon>
+                  </g>
+                )}
                 <text x={minx + 8} y={miny + 15} fill={m.accent} fontSize="11.5" fontWeight="600" fontFamily="Murecho">
                   {z.name}
                 </text>
                 <text x={minx + 8} y={miny + 27} fill={m.accent} fontSize="9.5" fontFamily="JetBrains Mono" opacity="0.85">
-                  {isExcl ? 'masked' : cnt + ' / 3'}
+                  {isExcl ? (occupied ? 'masked · occupied' : 'masked') : occupied ? 'occupied · ' + cnt + ' / 3' : cnt + ' / 3'}
                 </text>
                 {selected && (
                   <g>

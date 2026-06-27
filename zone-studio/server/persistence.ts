@@ -16,7 +16,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { BandConfig, SensorMount, Zone } from '../src/domain/types'
+import type { BandConfig, Profile, SensorMount, Zone } from '../src/domain/types'
 import type { DeviceMappingOverride } from './ha/types'
 import type { Logger } from './ha/HaWsClient'
 
@@ -28,6 +28,12 @@ export interface DeviceRecord {
   zones?: Zone[]
   /** The authored SEN0609 band (kept app-side; no registers written in Phase 3). */
   band?: BandConfig
+  /**
+   * The active profile of the last applied set (Phase 4). For `polygon` the
+   * persisted config is the source of truth (the device is in report-all mode and
+   * the add-on evaluates the zones); for `native` the hardware remains the truth.
+   */
+  profile?: Profile
 }
 
 interface PersistedStore {
@@ -89,6 +95,10 @@ export class Persistence {
     return this.store.devices[deviceId]?.band
   }
 
+  getProfile(deviceId: string): Profile | undefined {
+    return this.store.devices[deviceId]?.profile
+  }
+
   /** All mapping overrides, keyed by device id. */
   getMappings(): Record<string, DeviceMappingOverride> {
     const out: Record<string, DeviceMappingOverride> = {}
@@ -112,6 +122,10 @@ export class Persistence {
 
   setBand(deviceId: string, band: BandConfig): void {
     this.upsert(deviceId, (rec) => ({ ...rec, band }))
+  }
+
+  setProfile(deviceId: string, profile: Profile): void {
+    this.upsert(deviceId, (rec) => ({ ...rec, profile }))
   }
 
   private upsert(deviceId: string, fn: (rec: DeviceRecord) => DeviceRecord): void {

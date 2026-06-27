@@ -65,6 +65,12 @@ export interface EditorState {
   applyState: 'idle' | 'applying'
   /** The last apply/revert error, surfaced near the Apply button. */
   applyError: string | null
+  /**
+   * Whether the MQTT publish path is available for the active polygon device, from
+   * the last device read. null when not a polygon device or not yet known; false
+   * when polygon and MQTT is unavailable, so the editor can state it is required.
+   */
+  mqttAvailable: boolean | null
 }
 
 /** Imperative drag handle — non-reactive, mirrors the old `this.h`. */
@@ -120,6 +126,7 @@ export class ZoneStudioStore {
       saved: snapshot(seed.zones, seed.band),
       applyState: 'idle',
       applyError: null,
+      mqttAvailable: null,
     }
     this.resub(seed.activeDeviceId)
   }
@@ -157,6 +164,7 @@ export class ZoneStudioStore {
         sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
         connection: 'connected',
         applyError: null,
+        mqttAvailable: cfg.mqttAvailable ?? null,
       })
     } catch {
       // Real failure: clear any live stream and show the offline state. Do not
@@ -277,6 +285,7 @@ export class ZoneStudioStore {
           mount: cfg.mount ?? null,
           saved: snapshot(cfg.zones, cfg.band),
           sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
+          mqttAvailable: cfg.mqttAvailable ?? null,
         })
       })
       .catch(() => {
@@ -335,6 +344,7 @@ export class ZoneStudioStore {
         saved: snapshot(cfg.zones, cfg.band),
         applyState: 'idle',
         applyError: null,
+        mqttAvailable: cfg.mqttAvailable ?? null,
       })
     } catch (err) {
       if (this.state.activeDeviceId !== activeDeviceId) return
@@ -355,6 +365,7 @@ export class ZoneStudioStore {
         mount: cfg.mount ?? this.state.mount,
         saved: snapshot(cfg.zones, cfg.band),
         applyError: null,
+        mqttAvailable: cfg.mqttAvailable ?? null,
       })
     } catch (err) {
       if (this.state.activeDeviceId !== deviceId) return

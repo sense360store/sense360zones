@@ -50,6 +50,7 @@ const DEFAULTS: EditorState = {
   saved: JSON.stringify({ zones: [], band: BAND }),
   applyState: 'idle',
   applyError: null,
+  mqttAvailable: null,
 }
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({ ...DEFAULTS, ...over })
@@ -62,10 +63,11 @@ describe('applyView', () => {
     expect(v.canApply).toBe(true)
   })
 
-  it('blocks Apply with reasons for a non-native set', () => {
+  it('allows Apply for a polygon set and surfaces why it is polygon', () => {
+    // Phase 4: a non-native set is no longer blocked; Apply uses the live path.
     const v = applyView(state({ zones: fourZones }))
     expect(v.resolution.profile).toBe('polygon')
-    expect(v.canApply).toBe(false)
+    expect(v.canApply).toBe(true)
     expect(v.resolution.reasons.some((r) => /More than 3 zones/.test(r))).toBe(true)
   })
 
@@ -85,17 +87,23 @@ describe('applyView', () => {
 })
 
 describe('ApplyGuardrail rendering', () => {
-  it('renders the reasons and the polygon profile when blocked', () => {
+  it('renders the live-MQTT explanation and the reasons for a polygon set', () => {
     const html = renderToStaticMarkup(createElement(ApplyGuardrail, { view: applyView(state({ zones: fourZones })) }))
-    expect(html).toContain('Cannot apply')
-    expect(html).toMatch(/More than 3 zones/)
     expect(html).toContain('POLYGON')
+    expect(html).toContain('MQTT')
+    expect(html).toMatch(/More than 3 zones/)
+  })
+
+  it('warns that MQTT is required when it is unavailable for a polygon set', () => {
+    const view = applyView(state({ zones: fourZones, mqttAvailable: false }))
+    const html = renderToStaticMarkup(createElement(ApplyGuardrail, { view }))
+    expect(html).toContain('MQTT integration is required')
   })
 
   it('renders the native profile when eligible', () => {
     const html = renderToStaticMarkup(createElement(ApplyGuardrail, { view: applyView(state({ zones: [Z0] })) }))
     expect(html).toContain('NATIVE')
-    expect(html).not.toContain('Cannot apply')
+    expect(html).toContain('apply straight to the LD2450')
   })
 })
 

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { HaDataProvider } from '../server/provider/HaDataProvider'
 import { Persistence } from '../server/persistence'
 import { nativeRegion } from '../src/domain/native'
+import { FakeMqttPublisher } from '../server/mqtt/MqttPublisher'
 import type { BandConfig, RectZone, SensorMount } from '../src/domain/types'
 import { HaSim, startHaSim } from './ha-sim'
 import { LDZ, ZONE_TYPE_OPTIONS } from './ha-fixtures'
@@ -46,7 +47,15 @@ function tempDir(): string {
 }
 
 function makeProvider(dataDir = tempDir()): HaDataProvider {
-  const provider = new HaDataProvider({ wsUrl: sim.url, token: 'test-token', dataDir, reconnectBaseMs: 40, timeoutMs: 2000 })
+  // Inject a fake MQTT publisher so the polygon path activates without a broker.
+  const provider = new HaDataProvider({
+    wsUrl: sim.url,
+    token: 'test-token',
+    dataDir,
+    reconnectBaseMs: 40,
+    timeoutMs: 2000,
+    mqttFactory: async (topic) => new FakeMqttPublisher(topic),
+  })
   providers.push(provider)
   return provider
 }
@@ -96,23 +105,29 @@ describe('writeConfig (native LD2450 apply)', () => {
     expect([num(sim, LDZ.z1x1), num(sim, LDZ.z1y1), num(sim, LDZ.z1x2), num(sim, LDZ.z1y2)]).toEqual([0, 0, 0, 0])
   })
 
-  it('rejects a non-native set without writing', async () => {
+  it('routes a non-native set to the polygon path instead of writing native regions', async () => {
     const provider = makeProvider()
     await provider.discover()
+    // Apply a native detection zone first so a region and the mode are set.
+    await provider.writeConfig('dev_ld', { zones: [rect({ id: 'n', cx: 0, cy: 2, w: 1, h: 1 })], band, mount })
+    expect(sim.peek(LDZ.zoneType)).toBe('Detection')
+
+    // A four-zone set is not native-eligible: it becomes a polygon apply, which
+    // puts the device into report-all (Disabled) and clears the regions rather
+    // than throwing or writing a fourth region.
     const four = [rect({ id: 'a', cx: -2 }), rect({ id: 'b', cx: -0.7 }), rect({ id: 'c', cx: 0.7 }), rect({ id: 'd', cx: 2 })]
-    await expect(provider.writeConfig('dev_ld', { zones: four, band, mount })).rejects.toThrow(/More than 3 zones/)
-    // Nothing was written: the mode is still the initial Disabled.
+    await provider.writeConfig('dev_ld', { zones: four, band, mount })
     expect(sim.peek(LDZ.zoneType)).toBe('Disabled')
+    expect([num(sim, LDZ.z1x1), num(sim, LDZ.z1y1), num(sim, LDZ.z1x2), num(sim, LDZ.z1y2)]).toEqual([0, 0, 0, 0])
   })
 
-  it('rejects a rotated, out-of-range, or degenerate region', async () => {
+  it('applies a rotated or polygon set as report-all, not a native region write', async () => {
     const provider = makeProvider()
     await provider.discover()
-    await expect(provider.writeConfig('dev_ld', { zones: [rect({ rot: 45 })], band, mount })).rejects.toThrow(/rotated/)
-    await expect(
-      provider.writeConfig('dev_ld', { zones: [rect({ cx: 2.8, cy: 2, w: 1, h: 1 })], band, mount }),
-    ).rejects.toThrow(/beyond the sensor range/)
-    await expect(provider.writeConfig('dev_ld', { zones: [rect({ w: 0.0004 })], band, mount })).rejects.toThrow(/too small/)
+    await provider.writeConfig('dev_ld', { zones: [rect({ rot: 45 })], band, mount })
+    // Report-all: the mode is disabled and no region was written for the tilt.
+    expect(sim.peek(LDZ.zoneType)).toBe('Disabled')
+    expect([num(sim, LDZ.z1x1), num(sim, LDZ.z1y1), num(sim, LDZ.z1x2), num(sim, LDZ.z1y2)]).toEqual([0, 0, 0, 0])
   })
 
   it('throws when the device does not accept a written value', async () => {

@@ -4,6 +4,61 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-26
+
+### Added
+
+- The polygon profile. Arbitrary polygons, rotated rectangles, more than three
+  zones, and a per-zone mix of detection and exclusion now apply, instead of
+  being blocked. Apply puts the LD2450 into report-all mode (regions cleared,
+  zone_type disabled) so the add-on sees every target.
+- Live occupancy over MQTT. For a polygon device the backend evaluates each zone
+  and a derived device presence against the live target stream in software and
+  publishes a binary_sensor per zone, plus a presence sensor, through retained
+  MQTT discovery. Transitions are debounced with a small on and off delay so an
+  edge flicker does not toggle an entity. This is instant and needs no flash.
+- A shared occupancy primitive in the domain layer. One pure evaluator powers both
+  the live canvas highlight on the client and the published entities on the
+  backend, using the Phase 0 room frame and a non-convex-safe point-in-polygon
+  test, so an L-shaped zone evaluates correctly on both sides.
+- Device presence semantics. A target is counted when it is inside any detection
+  zone, or anywhere in range when there are no detection zones, and never when it
+  is inside an exclusion zone, so exclusion zones subtract from presence.
+- Retained discovery with availability. Entities carry an availability topic and
+  the add-on sets a last will, so they show unavailable when the add-on stops
+  rather than disappearing, and a zone's discovery config is cleared when the zone
+  is deleted.
+- Generated ESPHome config. A Generate ESPHome config action turns the drawn zones
+  into a package for the TillFleisch ESPHome-HLK-LD2450 component (pinned to
+  v1.0.6), with an occupancy binary sensor per zone and each non-convex zone split
+  into convex parts. The YAML can be copied or downloaded; flashing is a manual,
+  documented step.
+- Live canvas preview. A zone lights up the moment a target enters it, from the
+  same shared evaluator the backend publishes from, independent of the round trip
+  through Home Assistant.
+- The `mqtt:want` service, so the Supervisor grants the broker connection.
+
+### Changed
+
+- Source of truth is profile-aware. For a native set the hardware registers remain
+  the truth, as before. For a polygon set the device is in report-all mode and the
+  add-on's persisted active config is the truth; readConfig and Revert follow that
+  rule per profile.
+- Apply is no longer blocked for a non-native set. The editor explains that
+  occupancy now comes from the add-on's live evaluation published over MQTT, that
+  the device reports all targets, and that the generated config is the durable
+  option, reusing the resolver reasons from Phase 3.
+
+### Notes
+
+- Degrades clearly. If the MQTT integration is not available the canvas preview
+  still works and the editor states that MQTT is required to publish the polygon
+  zone entities; the device is not failed.
+- Polygon zones are an LD2450 capability. SEN0609 stays editable and persisted with
+  no register writes and no live presence, as in Phase 3.
+- No automatic push or flash to a device or the ESPHome dashboard. Generating the
+  config is built and tested here; adding it to the device and flashing is manual.
+
 ## [0.3.0] - 2026-06-26
 
 ### Added
@@ -96,6 +151,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Multi architecture image build (aarch64, amd64, armv7) and continuous
   integration.
 
+[0.4.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.4.0
 [0.3.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.2.0
 [0.1.0]: https://github.com/sense360store/sense360zones/releases/tag/v0.1.0
