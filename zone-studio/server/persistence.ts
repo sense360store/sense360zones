@@ -116,6 +116,19 @@ export class Persistence {
     this.upsert(deviceId, (rec) => ({ ...rec, mapping }))
   }
 
+  /**
+   * Merge a patch into the device's mapping override, preserving fields the patch
+   * does not touch. This is how a confirmation, a role correction, or a dismissal
+   * accumulate on the same device without overwriting one another.
+   */
+  updateMapping(deviceId: string, patch: DeviceMappingOverride): void {
+    this.upsert(deviceId, (rec) => {
+      const prev = rec.mapping ?? {}
+      const roles = patch.roles ? { ...prev.roles, ...patch.roles } : prev.roles
+      return { ...rec, mapping: { ...prev, ...patch, ...(roles ? { roles } : {}) } }
+    })
+  }
+
   setZones(deviceId: string, zones: Zone[]): void {
     this.upsert(deviceId, (rec) => ({ ...rec, zones }))
   }

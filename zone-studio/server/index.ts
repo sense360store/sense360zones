@@ -23,6 +23,7 @@ async function main() {
         wsUrl: cfg.haWsUrl,
         token: process.env.SUPERVISOR_TOKEN ?? '',
         dataDir: cfg.dataDir,
+        sense360Pattern: new RegExp(cfg.sense360Match, 'i'),
       })
     : null
   const provider: DataProvider = haProvider ?? new MockDataProvider()

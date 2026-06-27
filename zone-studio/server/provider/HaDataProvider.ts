@@ -23,8 +23,27 @@ import {
 } from '../../src/domain/native'
 import { resolveProfile } from '../../src/domain/profile'
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../../src/domain/constants'
-import type { BandConfig, Point, Room, Sensor, SensorMount, Target, Zone, ZoneType } from '../../src/domain/types'
-import { resolveMapping } from '../ha/detect'
+import type {
+  BandConfig,
+  CandidateRole,
+  DeviceCandidate,
+  MappingUpdate,
+  Point,
+  Room,
+  Sensor,
+  SensorMount,
+  Target,
+  Zone,
+  ZoneType,
+} from '../../src/domain/types'
+import {
+  DEFAULT_SENSE360_PATTERN,
+  detectSen0609Roles,
+  esphomeNode,
+  isSense360Device,
+  resolveDevice,
+  type DeviceResolution,
+} from '../ha/detect'
 import { sensorToRoom, toMetres } from '../ha/frame'
 import { HaWsClient, type ConnectionState, type Logger } from '../ha/HaWsClient'
 import { AVAILABILITY_TOPIC } from '../mqtt/discovery'
@@ -34,8 +53,10 @@ import {
   UNAVAILABLE_STATES,
   type AreaRegistryEntry,
   type DeviceMapping,
+  type DeviceMappingOverride,
   type DeviceRegistryEntry,
   type EntityRegistryEntry,
+  type EntityRoles,
   type HassState,
   type StateChangedEvent,
   type ZoneNumberRoles,
@@ -77,6 +98,12 @@ export interface HaDataProviderOptions {
   mqttFactory?: MqttPublisherFactory
   /** Debounce for occupancy transitions (milliseconds). Tests use 0 for immediacy. */
   occupancyDebounceMs?: { on: number; off: number }
+  /**
+   * Pattern recognising a Sense360 identity in a device's manufacturer or model.
+   * Defaults to /sense360/i. Discovery prefers matching ESPHome devices and marks
+   * them as known Sense360 hardware; when none match it offers all ESPHome devices.
+   */
+  sense360Pattern?: RegExp
 }
 
 export class HaDataProvider implements DataProvider {
@@ -90,6 +117,9 @@ export class HaDataProvider implements DataProvider {
   private rooms: Room[] = []
   /** Display names per device, used for the published MQTT device block. */
   private deviceNames = new Map<string, string>()
+  /** Enabled entity ids per device, cached from the last discovery. */
+  private entitiesByDevice = new Map<string, string[]>()
+  private readonly sense360Pattern: RegExp
 
   // ---- live polygon occupancy (Phase 4) ----------------------------------
   private readonly mqttFactory: MqttPublisherFactory
@@ -104,6 +134,7 @@ export class HaDataProvider implements DataProvider {
     this.logger = opts.logger ?? noopLogger
     this.mqttFactory = opts.mqttFactory ?? supervisorMqttFactory
     this.occupancyDebounceMs = opts.occupancyDebounceMs
+    this.sense360Pattern = opts.sense360Pattern ?? DEFAULT_SENSE360_PATTERN
     this.client = new HaWsClient({
       url: opts.wsUrl,
       token: opts.token,
@@ -149,22 +180,42 @@ export class HaDataProvider implements DataProvider {
       list.push(e.entity_id)
       entitiesByDevice.set(e.device_id, list)
     }
+    this.entitiesByDevice = entitiesByDevice
 
-    // Resolve a mapping per device (auto-detect, then persisted override).
+    // Scope candidates to ESPHome devices. This alone removes phones, person and
+    // pet trackers, and Zigbee or Z-Wave motion sensors, which is what made the
+    // old presence-class heuristic match the whole house.
+    const esphome = devices.filter((dev) => esphomeNode(dev) !== null)
+
+    // Optional Sense360 pre-filter: when at least one ESPHome device declares a
+    // recognisable Sense360 identity, prefer those; otherwise offer all ESPHome
+    // devices. Firmware does not declare an identity today, so the fallback is the
+    // normal path until it does.
+    const sense360 = esphome.filter((dev) => isSense360Device(dev, this.sense360Pattern))
+    const candidates = sense360.length ? sense360 : esphome
+    const sense360Ids = new Set(sense360.map((d) => d.id))
+
+    this.logCandidates(candidates, sense360Ids)
+
+    // Resolve each candidate (auto-detect, then persisted override + confirmation).
     this.mappings = new Map()
-    for (const dev of devices) {
+    const resolutions = new Map<string, DeviceResolution>()
+    for (const dev of candidates) {
       const ids = entitiesByDevice.get(dev.id) ?? []
-      const mapping = resolveMapping(dev.id, ids, stateOf, this.persistence.getMapping(dev.id))
-      if (mapping) this.mappings.set(dev.id, mapping)
+      const res = resolveDevice(dev.id, ids, stateOf, this.persistence.getMapping(dev.id))
+      resolutions.set(dev.id, res)
+      if (res.mapping) this.mappings.set(dev.id, res.mapping)
     }
 
-    // Build the room model from areas and the mapped devices. Areas with no
-    // detected sensor device are omitted rather than shown as empty rooms.
+    // Build the room model. A non-dismissed candidate is offered even before it is
+    // a radar sensor, so the operator can confirm it; only its confirmed or
+    // confidently detected radar sensors populate `sensors`. Areas with no offered
+    // candidate are omitted rather than shown as empty rooms.
     const areaName = new Map(areas.map((a) => [a.area_id, a.name]))
     const roomsById = new Map<string, Room>()
-    for (const dev of devices) {
-      const mapping = this.mappings.get(dev.id)
-      if (!mapping) continue
+    for (const dev of candidates) {
+      const res = resolutions.get(dev.id)!
+      if (res.dismissed) continue
 
       const roomId = dev.area_id ? `area:${dev.area_id}` : 'area:unassigned'
       let room = roomsById.get(roomId)
@@ -175,12 +226,18 @@ export class HaDataProvider implements DataProvider {
       }
 
       const mount = this.persistence.getMount(dev.id) ?? clone(DEFAULT_MOUNT)
-      room.devices.push({ id: dev.id, name: deviceName(dev), sensors: [this.buildSensor(dev.id, mapping, mount)] })
+      const ids = entitiesByDevice.get(dev.id) ?? []
+      room.devices.push({
+        id: dev.id,
+        name: deviceName(dev),
+        sensors: this.buildSensors(dev.id, res, mount, ids),
+        candidate: this.buildCandidate(dev, res, sense360Ids.has(dev.id), ids),
+      })
     }
 
     this.rooms = [...roomsById.values()]
     this.deviceNames = new Map(this.rooms.flatMap((r) => r.devices).map((d) => [d.id, d.name]))
-    this.logDetection(devices.length)
+    this.logDetection(candidates.length)
 
     // Re-activate the live evaluator for any device persisted as polygon, so its
     // entities reappear and tracking resumes after an add-on restart.
@@ -226,6 +283,14 @@ export class HaDataProvider implements DataProvider {
   }
 
   async writeConfig(deviceId: string, config: DeviceConfig): Promise<void> {
+    // A mapping confirmation/correction/dismissal rides on the write payload. It
+    // persists as the device's override and re-resolves the device, and never
+    // touches the zones/band, so confirmation reuses the existing write path.
+    if (config.mapping) {
+      this.applyMappingUpdate(deviceId, config.mapping)
+      return
+    }
+
     if (config.mount) this.persistence.setMount(deviceId, config.mount)
     const mount = config.mount ?? this.persistence.getMount(deviceId) ?? clone(DEFAULT_MOUNT)
     const mapping = this.mappings.get(deviceId)
@@ -468,25 +533,85 @@ export class HaDataProvider implements DataProvider {
     return this.occupancy
   }
 
-  private buildSensor(deviceId: string, mapping: DeviceMapping, mount: SensorMount): Sensor {
-    if (mapping.kind === 'ld2450') {
-      return {
-        id: `${deviceId}:ld2450`,
-        name: 'HLK LD2450',
-        kind: 'ld2450',
-        mount: clone(mount),
-        fovHalf: LD2450_FOV_HALF,
-        range: LD2450_RANGE,
-        zones: this.reconstructZones(deviceId, mapping, mount, this.states),
-      }
+  /**
+   * Build the radar sensors for an active device. An LD2450 owns the drawable
+   * zones and the live target stream; a SEN0609 owns the range band. A single ESP
+   * can carry both, so an LD2450 device that also shows the SEN0609
+   * presence-with-distance signature renders both layers; the rest of the device's
+   * entities are ignored. A device with no active mapping has no sensors.
+   */
+  private buildSensors(deviceId: string, res: DeviceResolution, mount: SensorMount, entityIds: string[]): Sensor[] {
+    const mapping = res.mapping
+    if (!mapping) return []
+
+    const ld: Sensor = {
+      id: `${deviceId}:ld2450`,
+      name: 'HLK LD2450',
+      kind: 'ld2450',
+      mount: clone(mount),
+      fovHalf: LD2450_FOV_HALF,
+      range: LD2450_RANGE,
+      zones: this.reconstructZones(deviceId, mapping, mount, this.states),
     }
-    return {
+    const sen: Sensor = {
       id: `${deviceId}:sen0609`,
       name: 'DFRobot SEN0609',
       kind: 'sen0609',
       mount: clone(mount),
       band: clone(this.persistence.getBand(deviceId) ?? DEFAULT_BAND),
     }
+
+    if (mapping.kind === 'sen0609') return [sen]
+
+    // An LD2450 device: render the SEN0609 too when its signature is present and a
+    // user override has not pinned the device to a single kind.
+    const sensors: Sensor[] = [ld]
+    const stateOf = (id: string) => this.states.get(id)
+    if (detectSen0609Roles(entityIds, stateOf)) sensors.push(sen)
+    return sensors
+  }
+
+  /** Build the discovery metadata for the mapping and confirmation surface. */
+  private buildCandidate(
+    dev: DeviceRegistryEntry,
+    res: DeviceResolution,
+    sense360: boolean,
+    entityIds: string[],
+  ): DeviceCandidate {
+    return {
+      kind: res.kind,
+      confidence: res.confidence,
+      confirmed: res.confirmed,
+      dismissed: res.dismissed,
+      sense360,
+      manufacturer: dev.manufacturer ?? undefined,
+      node: esphomeNode(dev) ?? undefined,
+      roles: candidateRoles(res, entityIds, (id) => this.states.get(id)),
+    }
+  }
+
+  /**
+   * Persist a mapping confirmation/correction/dismissal and re-resolve the device
+   * in memory so an immediate read reflects it. Discovery is re-run by the client
+   * after a confirmation, which rebuilds the room model and the sensor layers.
+   */
+  private applyMappingUpdate(deviceId: string, update: MappingUpdate): void {
+    const patch: DeviceMappingOverride = {}
+    if (update.dismissed !== undefined) patch.dismissed = update.dismissed
+    if (update.confirmed !== undefined) patch.confirmed = update.confirmed
+    if (update.kind !== undefined) {
+      patch.kind = update.kind
+      patch.confirmed = true
+      patch.dismissed = false
+    }
+    if (update.roles) patch.roles = correctionsToRoles(this.persistence.getMapping(deviceId)?.roles, update.roles)
+    this.persistence.updateMapping(deviceId, patch)
+
+    const ids = this.entitiesByDevice.get(deviceId) ?? []
+    const res = resolveDevice(deviceId, ids, (id) => this.states.get(id), this.persistence.getMapping(deviceId))
+    if (res.mapping) this.mappings.set(deviceId, res.mapping)
+    else this.mappings.delete(deviceId)
+    this.logger.info({ deviceId, kind: res.kind, confirmed: res.confirmed, dismissed: res.dismissed }, 'updated device mapping')
   }
 
   /** Pull a fresh snapshot of all entity states and cache it. */
@@ -599,6 +724,33 @@ export class HaDataProvider implements DataProvider {
     return out
   }
 
+  /**
+   * Log each ESPHome candidate's name, manufacturer and identifiers, so the
+   * operator can see what their devices actually report and whether a Sense360
+   * firmware identity is present.
+   */
+  private logCandidates(candidates: DeviceRegistryEntry[], sense360Ids: Set<string>): void {
+    this.logger.info(
+      { candidates: candidates.length, sense360: sense360Ids.size },
+      sense360Ids.size
+        ? `discovery scoped to ${sense360Ids.size} Sense360 device(s) of ${candidates.length} ESPHome candidate(s)`
+        : `discovery offering ${candidates.length} ESPHome candidate(s); no Sense360 identity declared`,
+    )
+    for (const dev of candidates) {
+      this.logger.debug(
+        {
+          deviceId: dev.id,
+          name: deviceName(dev),
+          manufacturer: dev.manufacturer ?? null,
+          model: dev.model ?? null,
+          node: esphomeNode(dev),
+          sense360: sense360Ids.has(dev.id),
+        },
+        'discovery candidate',
+      )
+    }
+  }
+
   private logDetection(deviceCount: number): void {
     const detected = [...this.mappings.values()].map((m) => ({ deviceId: m.deviceId, kind: m.kind }))
     this.logger.info(
@@ -609,6 +761,68 @@ export class HaDataProvider implements DataProvider {
       this.logger.debug({ deviceId: m.deviceId, kind: m.kind, roles: m.roles }, 'resolved device mapping')
     }
   }
+}
+
+/** Build the role list shown in the confirmation surface for a resolved device. */
+function candidateRoles(
+  res: DeviceResolution,
+  entityIds: string[],
+  stateOf: (entityId: string) => HassState | undefined,
+): CandidateRole[] {
+  const out: CandidateRole[] = []
+  const kind = res.kind
+  const hasTargets = res.roles.targets.some((t) => t.x || t.y)
+
+  // LD2450 roles: the per-target X/Y entities and the zone_type select.
+  if (kind === 'ld2450' || (kind === null && hasTargets)) {
+    res.roles.targets.forEach((t, i) => {
+      out.push({ key: `target${i + 1}x`, label: `Target ${i + 1} · X`, entityId: t.x })
+      out.push({ key: `target${i + 1}y`, label: `Target ${i + 1} · Y`, entityId: t.y })
+    })
+    out.push({ key: 'zoneType', label: 'Zone type select', entityId: res.roles.zoneType })
+  }
+
+  // SEN0609 roles: presence and distance. Show them for a SEN0609, and also when
+  // the signature is present on an LD2450 device that carries both.
+  const sen = detectSen0609Roles(entityIds, stateOf)
+  if (kind === 'sen0609' || sen) {
+    out.push({ key: 'presence', label: 'Presence', entityId: res.roles.presence ?? sen?.presence })
+    out.push({ key: 'distance', label: 'Distance', entityId: res.roles.distance ?? sen?.distance })
+  }
+  return out
+}
+
+/**
+ * Translate a flat role-correction map (role key → entity id) into an EntityRoles
+ * override patch, merged over the device's existing override roles. An empty
+ * string clears a role. Only target slots, the zone_type select, presence and
+ * distance are correctable from the surface; the zone region numbers stay
+ * auto-detected.
+ */
+function correctionsToRoles(
+  base: Partial<EntityRoles> | undefined,
+  corrections: Record<string, string>,
+): Partial<EntityRoles> {
+  const roles: Partial<EntityRoles> = base ? clone(base) : {}
+  const targets = roles.targets ? clone(roles.targets) : [{}, {}, {}]
+  let touchedTargets = false
+
+  for (const [key, raw] of Object.entries(corrections)) {
+    const value = raw || undefined
+    const tm = /^target([123])(x|y|speed)$/.exec(key)
+    if (tm) {
+      const slot = Number(tm[1]) - 1
+      targets[slot] = { ...targets[slot], [tm[2]]: value }
+      touchedTargets = true
+      continue
+    }
+    if (key === 'presence') roles.presence = value
+    else if (key === 'distance') roles.distance = value
+    else if (key === 'zoneType') roles.zoneType = value
+  }
+
+  if (touchedTargets) roles.targets = targets
+  return roles
 }
 
 /** The all-zero region written to an unused zone slot to clear it. */

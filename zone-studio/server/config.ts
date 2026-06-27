@@ -37,6 +37,13 @@ export interface ServerConfig {
   haWsUrl: string
   /** Writable directory for the mapping and mount record. `/data` inside the add-on. */
   dataDir: string
+  /**
+   * Pattern (a regular expression source) that recognises a Sense360 identity in a
+   * device's manufacturer or model. When at least one ESPHome device matches,
+   * discovery prefers the matching devices and marks them as known Sense360
+   * hardware; otherwise it falls back to the full ESPHome candidate list.
+   */
+  sense360Match: string
 }
 
 /** The fixed Supervisor ingress peer address (documented by Home Assistant). */
@@ -90,5 +97,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     provider: toProviderKind(env.PROVIDER),
     haWsUrl: env.HA_WS_URL ?? DEFAULT_HA_WS_URL,
     dataDir: env.DATA_DIR ?? defaultDataDir(env),
+    sense360Match: env.SENSE360_MATCH ?? 'sense360',
   }
 }

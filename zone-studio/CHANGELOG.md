@@ -4,6 +4,44 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Discovery is scoped to real radar candidates. Candidate devices are restricted to
+  ESPHome devices, identified by an `['esphome', node]` entry in the device
+  registry, instead of any device with a presence, occupancy or motion
+  binary_sensor. This alone removes person and pet trackers, phones, and Zigbee or
+  Z-Wave motion sensors, so a cat tracker no longer appears as a SEN0609.
+- The SEN0609 match is tightened to the DFRobot radar signature: a presence
+  binary_sensor together with a distance sensor on the same device. A lone
+  presence, occupancy or motion sensor never classifies a device. Detection runs on
+  a device's own entities, so an ESP that carries a radar plus unrelated modules
+  (air quality, fans) is classified by its radar entities and the rest is ignored.
+- A device is treated as an LD2450 or SEN0609 only when the user has confirmed it
+  or a confident radar entity signature is present. ESPHome candidates with no
+  signature are offered for confirmation rather than silently mapped.
+- The left panel layers and the canvas follow the selected device's real detected
+  sensors. A device shows only the layers it has, a device that carries both an
+  LD2450 and a SEN0609 renders both, and a device with no confirmed radar sensor
+  shows a prompt to confirm or correct the mapping instead of empty scenery.
+
+### Added
+
+- A device mapping and confirmation surface. From the picker the operator can open
+  a device, see the radar entities matched to each role with a confidence
+  indicator, confirm the device as an LD2450 or SEN0609, correct any role, or
+  dismiss the device as not a radar sensor. Confirmations, corrections and
+  dismissals persist through the existing mapping override, so a dismissed device
+  stays hidden and a confirmed device stays mapped across restarts.
+- An optional Sense360 pre-filter. When at least one ESPHome device declares a
+  recognisable Sense360 identity in its manufacturer or model (configurable through
+  `SENSE360_MATCH`), discovery prefers those devices and marks them as known
+  Sense360 hardware. Firmware does not declare one today, so discovery falls back to
+  the full ESPHome candidate list until it does. Each candidate's name,
+  manufacturer and identifiers are logged so the operator can see what their devices
+  report.
+
 ## [0.4.0] - 2026-06-26
 
 ### Added
