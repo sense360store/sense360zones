@@ -145,8 +145,17 @@ export interface DeviceMapping {
  * Any field present replaces the auto-detected value; absent fields fall back to
  * auto-detection. This is how a device that does not match the heuristics is
  * fixed without code changes.
+ *
+ * `confirmed` and `dismissed` carry the explicit user decision from the mapping
+ * surface: a confirmed device stays mapped across restarts even without a
+ * confident entity signature, and a dismissed device stays hidden. Forcing a
+ * `kind` implies confirmation.
  */
 export interface DeviceMappingOverride {
   kind?: DetectedKind
   roles?: Partial<EntityRoles>
+  /** The user confirmed this device as a radar sensor. */
+  confirmed?: boolean
+  /** The user marked this device as not a radar sensor; discovery hides it. */
+  dismissed?: boolean
 }

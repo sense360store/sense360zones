@@ -18,8 +18,13 @@ interface LayerRow {
 export function LeftPanel() {
   const s = useEditorState()
   const occ = occupancyCounts(s.zones, s.targets)
+  const hasLd = s.sensors.includes('ld2450')
+  const hasSen = s.sensors.includes('sen0609')
 
-  const layers: LayerRow[] = [
+  // The layers follow the device's real sensors: a device shows only the layers it
+  // actually has. A device with no confirmed radar sensor shows none, and the
+  // panel invites the user to confirm the mapping instead.
+  const allLayers: LayerRow[] = [
     {
       key: 'ld',
       name: 'HLK LD2450 · zones',
@@ -41,6 +46,7 @@ export function LeftPanel() {
       select: () => store.selectBand(),
     },
   ]
+  const layers = allLayers.filter((L) => (L.key === 'ld' ? hasLd : hasSen))
 
   return (
     <div
@@ -49,9 +55,25 @@ export function LeftPanel() {
       )}
     >
       <div style={css('padding:15px 18px 12px;border-bottom:1px solid var(--bd2);')}>
-        <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;margin-bottom:10px;')}>
-          LAYERS
+        <div style={css('display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;')}>
+          <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;')}>LAYERS</div>
+          <button
+            onClick={() => store.selectDeviceMapping()}
+            title="Device mapping and confirmation"
+            style={css(
+              `font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ${
+                s.sel.kind === 'device' ? 'var(--green)' : 'var(--bd)'
+              };background:var(--ins);color:var(--mut);`,
+            )}
+          >
+            Device
+          </button>
         </div>
+        {layers.length === 0 && (
+          <div style={css('font-size:11.5px;color:var(--faint);line-height:1.5;padding:4px 2px 8px;')}>
+            No confirmed radar sensor on this device. Open Device to confirm or correct the mapping.
+          </div>
+        )}
         {layers.map((L) => (
           <div
             key={L.key}
@@ -86,13 +108,16 @@ export function LeftPanel() {
         ))}
       </div>
 
-      <div style={css('padding:14px 18px 8px;display:flex;align-items:center;justify-content:space-between;')}>
-        <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;')}>
-          LD2450 ZONES · {s.zones.length}
+      {hasLd && (
+        <div style={css('padding:14px 18px 8px;display:flex;align-items:center;justify-content:space-between;')}>
+          <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;')}>
+            LD2450 ZONES · {s.zones.length}
+          </div>
         </div>
-      </div>
+      )}
       <div style={css('flex:1;overflow-y:auto;padding:2px 12px 12px;min-height:0;')}>
-        {s.zones.map((z) => {
+        {hasLd &&
+          s.zones.map((z) => {
           const m = zoneMeta(z.type)
           const isExcl = z.type === 'exclusion'
           const cnt = occ[z.id] || 0
@@ -137,17 +162,23 @@ export function LeftPanel() {
                 {isExcl ? 'excl' : cnt + '/3'}
               </span>
             </div>
-          )
-        })}
-        <div style={css('font-size:11px;color:var(--faint);padding:8px 10px;line-height:1.5;')}>
-          Draw tools live on the canvas toolbar. SEN0609 has no drawable zones — only its radial band.
-        </div>
+            )
+          })}
+        {hasLd && (
+          <div style={css('font-size:11px;color:var(--faint);padding:8px 10px;line-height:1.5;')}>
+            Draw tools live on the canvas toolbar. SEN0609 has no drawable zones, only its radial band.
+          </div>
+        )}
       </div>
 
-      {/* Active profile and what Apply does, pinned below the list. */}
-      <ApplyGuardrail view={applyView(s)} />
-      {/* The durable ESPHome export for the drawn zones. */}
-      <EsphomeExport />
+      {/* Active profile and what Apply does, pinned below the list. Only the LD2450
+          owns drawable zones, so the guardrail and export are LD2450-only. */}
+      {hasLd && (
+        <>
+          <ApplyGuardrail view={applyView(s)} />
+          <EsphomeExport />
+        </>
+      )}
     </div>
   )
 }

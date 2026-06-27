@@ -14,6 +14,9 @@ import type { Target } from '../src/domain/types'
 import type { SensorMount } from '../src/domain/types'
 import { HaSim, startHaSim } from './ha-sim'
 import { LD } from './ha-fixtures'
+import type { Room } from '../src/domain/types'
+
+const allDevices = (rooms: Room[]) => rooms.flatMap((r) => r.devices)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -146,6 +149,71 @@ describe('HaDataProvider against the simulator', () => {
     const unsub = provider.subscribeTargets('dev_sen', (t) => frames.push(t))
     expect(frames).toEqual([[]])
     unsub()
+  })
+
+  it('offers only ESPHome radar devices and excludes trackers and motion sensors', async () => {
+    const provider = makeProvider()
+    const rooms = await provider.discover()
+    const ids = allDevices(rooms).map((d) => d.id)
+
+    // The two ESPHome radar devices are offered.
+    expect(ids).toContain('dev_ld')
+    expect(ids).toContain('dev_sen')
+    // The cat and the Zigbee motion sensor never appear as candidates.
+    expect(ids).not.toContain('dev_cat')
+    expect(ids).not.toContain('dev_motion')
+    expect(allDevices(rooms).some((d) => d.name === 'Silver')).toBe(false)
+  })
+
+  it('reports the detected kind and a confidence indicator per candidate', async () => {
+    const provider = makeProvider()
+    const rooms = await provider.discover()
+    const ld = allDevices(rooms).find((d) => d.id === 'dev_ld')!
+    const sen = allDevices(rooms).find((d) => d.id === 'dev_sen')!
+
+    expect(ld.candidate).toMatchObject({ kind: 'ld2450', confidence: 'confident', confirmed: false, dismissed: false })
+    expect(ld.candidate?.node).toBe('ld-aabbcc')
+    expect(ld.candidate?.roles.find((r) => r.key === 'target1x')?.entityId).toBe(LD.t1x)
+
+    expect(sen.candidate).toMatchObject({ kind: 'sen0609', confidence: 'confident' })
+    expect(sen.candidate?.roles.find((r) => r.key === 'distance')?.entityId).toBe('sensor.bedroom_distance')
+    // Today's fixtures declare no Sense360 identity, so the prefilter does not mark them.
+    expect(sen.candidate?.sense360).toBe(false)
+  })
+
+  it('persists a confirmation written through the mapping channel', async () => {
+    const dir = tempDir()
+    const first = makeProvider(dir)
+    await first.discover()
+    // Correct dev_ld to a SEN0609 through the mapping channel.
+    await first.writeConfig('dev_ld', {
+      zones: [],
+      band: (await first.readConfig('dev_ld')).band,
+      mapping: { kind: 'sen0609' },
+    })
+    first.dispose()
+
+    const second = makeProvider(dir)
+    const rooms = await second.discover()
+    const ld = allDevices(rooms).find((d) => d.id === 'dev_ld')!
+    expect(ld.sensors[0].kind).toBe('sen0609')
+    expect(ld.candidate?.confirmed).toBe(true)
+  })
+
+  it('keeps a dismissed device hidden across a restart', async () => {
+    const dir = tempDir()
+    const first = makeProvider(dir)
+    await first.discover()
+    await first.writeConfig('dev_sen', {
+      zones: [],
+      band: (await first.readConfig('dev_sen')).band,
+      mapping: { dismissed: true },
+    })
+    first.dispose()
+
+    const second = makeProvider(dir)
+    const rooms = await second.discover()
+    expect(allDevices(rooms).some((d) => d.id === 'dev_sen')).toBe(false)
   })
 
   it('applies a persisted mapping override during discovery', async () => {

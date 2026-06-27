@@ -11,7 +11,7 @@
  * frontend's `DeviceConfig` (both reference the same domain `Zone`/`BandConfig`),
  * so a value serialised on either side deserialises cleanly on the other.
  */
-import type { BandConfig, Room, SensorMount, Target, Zone } from '../../src/domain/types'
+import type { BandConfig, MappingUpdate, Room, SensorMount, Target, Zone } from '../../src/domain/types'
 
 /**
  * The authored configuration for one device's sensors.
@@ -34,6 +34,13 @@ export interface DeviceConfig {
    * on the read payload without changing the provider contract.
    */
   mqttAvailable?: boolean
+  /**
+   * A mapping confirmation, correction, or dismissal from the mapping surface.
+   * When present on a write the provider persists it as the device's mapping
+   * override and ignores the zones/band, so confirmation rides on the existing
+   * write path without changing the provider contract.
+   */
+  mapping?: MappingUpdate
 }
 
 export type TargetListener = (targets: Target[]) => void

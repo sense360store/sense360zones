@@ -12,7 +12,20 @@
  * the same "one update, whole tree re-renders" model the class component had.
  */
 import { snapHalf } from '../domain/geometry'
-import type { BandConfig, Point, PolyZone, RectZone, Room, SensorMount, Target, Zone } from '../domain/types'
+import type {
+  BandConfig,
+  Device,
+  DeviceCandidate,
+  MappingUpdate,
+  Point,
+  PolyZone,
+  RectZone,
+  Room,
+  SensorKind,
+  SensorMount,
+  Target,
+  Zone,
+} from '../domain/types'
 import type { Seed } from '../client/MockZonesClient'
 import type { Unsubscribe, ZonesClient } from '../client/ZonesClient'
 
@@ -35,6 +48,7 @@ export type Selection =
   | { kind: 'zone'; id: string }
   | { kind: 'sen' } // SEN0609 radial band
   | { kind: 'ld' } // LD2450 sensor
+  | { kind: 'device' } // the device mapping / confirmation surface
   | { kind: 'none' }
 
 export interface EditorState {
@@ -49,6 +63,10 @@ export interface EditorState {
   view: View
   tool: Tool
   layers: { ld: boolean; sen: boolean }
+  /** The radar sensor kinds the active device actually has; drives the layers and canvas. */
+  sensors: SensorKind[]
+  /** The active device's discovery metadata; drives the mapping/confirmation surface. */
+  candidate: DeviceCandidate | null
   sel: Selection
   // working copy of the active device's sensor config
   zones: Zone[]
@@ -95,6 +113,32 @@ export function isDirty(s: EditorState): boolean {
   return snapshot(s.zones, s.band) !== s.saved
 }
 
+/** Find a device across rooms by id. */
+function findDevice(rooms: Room[], deviceId: string): Device | undefined {
+  for (const r of rooms) {
+    const d = r.devices.find((d) => d.id === deviceId)
+    if (d) return d
+  }
+  return undefined
+}
+
+/** The radar sensor kinds a device actually carries (empty for a candidate). */
+function deviceSensorKinds(device: Device | undefined): SensorKind[] {
+  return device ? device.sensors.map((s) => s.kind) : []
+}
+
+/**
+ * The default selection for a device: a zone (or the LD2450) when it has spatial
+ * tracking, the band when it is a SEN0609, and the mapping surface when it has no
+ * confirmed radar sensor, so the user is invited to confirm rather than shown an
+ * empty canvas.
+ */
+function defaultSelection(sensors: SensorKind[], zones: Zone[]): Selection {
+  if (sensors.includes('ld2450')) return zones[0] ? { kind: 'zone', id: zones[0].id } : { kind: 'ld' }
+  if (sensors.includes('sen0609')) return { kind: 'sen' }
+  return { kind: 'device' }
+}
+
 export class ZoneStudioStore {
   private state: EditorState
   private listeners = new Set<Listener>()
@@ -105,6 +149,8 @@ export class ZoneStudioStore {
 
   constructor(client: ZonesClient, seed: Seed) {
     this.client = client
+    const seedDevice = findDevice(seed.rooms, seed.activeDeviceId)
+    const seedSensors = deviceSensorKinds(seedDevice)
     this.state = {
       rooms: seed.rooms,
       activeRoomId: seed.activeRoomId,
@@ -116,6 +162,8 @@ export class ZoneStudioStore {
       view: 'wall',
       tool: 'select',
       layers: { ld: true, sen: true },
+      sensors: seedSensors,
+      candidate: seedDevice?.candidate ?? null,
       sel: { kind: 'zone', id: seed.zones[0]?.id ?? '' },
       zones: seed.zones,
       band: seed.band,
@@ -145,23 +193,26 @@ export class ZoneStudioStore {
       const devices = rooms.flatMap((r) => r.devices)
       if (devices.length === 0) {
         this.resub('')
-        this.set({ rooms, connection: 'no-devices', targets: [], sel: { kind: 'none' } })
+        this.set({ rooms, connection: 'no-devices', targets: [], sensors: [], candidate: null, sel: { kind: 'none' } })
         return
       }
       // Keep the current selection if it still exists, else take the first device.
       const room = rooms.find((r) => r.id === this.state.activeRoomId && r.devices.length) ?? rooms.find((r) => r.devices.length)!
       const device = room.devices.find((d) => d.id === this.state.activeDeviceId) ?? room.devices[0]
+      const sensors = deviceSensorKinds(device)
       const cfg = await this.client.readConfig(device.id)
       this.resub(device.id)
       this.set({
         rooms,
         activeRoomId: room.id,
         activeDeviceId: device.id,
+        sensors,
+        candidate: device.candidate ?? null,
         zones: cfg.zones,
         band: cfg.band,
         mount: cfg.mount ?? null,
         saved: snapshot(cfg.zones, cfg.band),
-        sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
+        sel: defaultSelection(sensors, cfg.zones),
         connection: 'connected',
         applyError: null,
         mqttAvailable: cfg.mqttAvailable ?? null,
@@ -192,10 +243,13 @@ export class ZoneStudioStore {
   hydrate(seed: Seed) {
     const sameDevice = seed.activeDeviceId === this.state.activeDeviceId
     if (!sameDevice) this.unsub()
+    const device = findDevice(seed.rooms, seed.activeDeviceId)
     this.set({
       rooms: seed.rooms,
       activeRoomId: seed.activeRoomId,
       activeDeviceId: seed.activeDeviceId,
+      sensors: deviceSensorKinds(device),
+      candidate: device?.candidate ?? null,
       zones: seed.zones,
       band: seed.band,
       saved: snapshot(seed.zones, seed.band),
@@ -254,8 +308,41 @@ export class ZoneStudioStore {
   selectLd() {
     this.set({ sel: { kind: 'ld' } })
   }
+  /** Open the device mapping / confirmation surface. */
+  selectDeviceMapping() {
+    this.set({ sel: { kind: 'device' } })
+  }
   toggleLayer(k: 'ld' | 'sen') {
     this.setFn((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } }))
+  }
+
+  // ---- device mapping / confirmation ------------------------------------
+  /**
+   * Send a mapping confirmation/correction/dismissal for the active device, then
+   * re-discover so the room model and the sensor layers reflect the new decision.
+   * The write rides on the config payload; the backend ignores the zones/band.
+   */
+  private async writeMapping(update: MappingUpdate): Promise<void> {
+    const deviceId = this.state.activeDeviceId
+    if (!deviceId) return
+    try {
+      await this.client.writeConfig(deviceId, { zones: clone(this.state.zones), band: clone(this.state.band), mapping: update })
+      await this.refresh()
+    } catch (err) {
+      this.set({ applyError: errorMessage(err) })
+    }
+  }
+  /** Confirm the active device as the given radar kind. */
+  confirmDevice(kind: SensorKind): Promise<void> {
+    return this.writeMapping({ kind, confirmed: true })
+  }
+  /** Hide the active device as not a radar sensor. */
+  dismissDevice(): Promise<void> {
+    return this.writeMapping({ dismissed: true })
+  }
+  /** Reassign one role (e.g. presence, distance, a target axis) to an entity. */
+  correctRole(key: string, entityId: string): Promise<void> {
+    return this.writeMapping({ roles: { [key]: entityId } })
   }
 
   // ---- room / device picker ---------------------------------------------
@@ -273,8 +360,17 @@ export class ZoneStudioStore {
   selectDevice(deviceId: string) {
     if (!deviceId || deviceId === this.state.activeDeviceId) return
     const room = this.state.rooms.find((r) => r.devices.some((d) => d.id === deviceId))
+    const device = findDevice(this.state.rooms, deviceId)
+    const sensors = deviceSensorKinds(device)
     this.resub(deviceId)
-    this.set({ activeDeviceId: deviceId, activeRoomId: room?.id ?? this.state.activeRoomId, targets: [], applyError: null })
+    this.set({
+      activeDeviceId: deviceId,
+      activeRoomId: room?.id ?? this.state.activeRoomId,
+      sensors,
+      candidate: device?.candidate ?? null,
+      targets: [],
+      applyError: null,
+    })
     void this.client
       .readConfig(deviceId)
       .then((cfg) => {
@@ -284,7 +380,7 @@ export class ZoneStudioStore {
           band: cfg.band,
           mount: cfg.mount ?? null,
           saved: snapshot(cfg.zones, cfg.band),
-          sel: cfg.zones[0] ? { kind: 'zone', id: cfg.zones[0].id } : { kind: 'ld' },
+          sel: defaultSelection(sensors, cfg.zones),
           mqttAvailable: cfg.mqttAvailable ?? null,
         })
       })

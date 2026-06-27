@@ -6,7 +6,7 @@
  * Assistant WebSocket API without the UI changing: discovery, the live target
  * stream, and the read/write config path all flow through this interface.
  */
-import type { BandConfig, Room, SensorMount, Target, Zone } from '../domain/types'
+import type { BandConfig, MappingUpdate, Room, SensorMount, Target, Zone } from '../domain/types'
 
 /**
  * The authored configuration for one device's sensors. Mirrors the server's
@@ -29,6 +29,13 @@ export interface DeviceConfig {
    * contract is unchanged.
    */
   mqttAvailable?: boolean
+  /**
+   * A mapping confirmation, correction, or dismissal. When present on a write the
+   * backend persists it as the device's mapping override and ignores the
+   * zones/band, so confirmation rides on the existing write path. Mirrors the
+   * server's `DeviceConfig.mapping`.
+   */
+  mapping?: MappingUpdate
 }
 
 export type TargetListener = (targets: Target[]) => void

@@ -2,9 +2,15 @@
  * Home Assistant fixtures for the simulator and the provider tests.
  *
  * One ESPHome LD2450 in the Living Room with target 1..3 x, y and speed, and one
- * ESPHome SEN0609 in the Bedroom with a presence binary_sensor and a distance
- * sensor. Targets 1 occupied, 2 empty (0,0), 3 unavailable, so discovery and the
- * first frame already exercise the empty-slot and unavailable cases.
+ * ESPHome SEN0609 in the Bedroom with a presence binary_sensor, a distance sensor
+ * and unrelated air quality entities (so detection must pick the radar out of a
+ * busy device). Targets 1 occupied, 2 empty (0,0), 3 unavailable, so discovery and
+ * the first frame already exercise the empty-slot and unavailable cases.
+ *
+ * Two devices must never be offered as candidates: a non-ESPHome pet tracker named
+ * "Silver" with a presence binary_sensor (the cat that used to show up as a
+ * SEN0609), and a non-ESPHome Zigbee motion sensor. Both are excluded by the
+ * ESPHome scope, not by their device_class.
  */
 import type {
   AreaRegistryEntry,
@@ -36,6 +42,27 @@ export const devices: DeviceRegistryEntry[] = [
     model: 'SEN0609',
     manufacturer: 'DFRobot',
     identifiers: [['esphome', 'sen-ddeeff']],
+  },
+  // Excluded: a non-ESPHome pet tracker with a presence binary_sensor. The old
+  // heuristic classified this as a SEN0609; the ESPHome scope must drop it.
+  {
+    id: 'dev_cat',
+    area_id: 'living_room',
+    name: 'Silver',
+    name_by_user: null,
+    model: 'GPS Tracker',
+    manufacturer: 'Tractive',
+    identifiers: [['tractive', 'silver-7f3a']],
+  },
+  // Excluded: a non-ESPHome Zigbee motion sensor.
+  {
+    id: 'dev_motion',
+    area_id: 'bedroom',
+    name: 'Hallway Motion',
+    name_by_user: null,
+    model: 'RTCGQ11LM',
+    manufacturer: 'Aqara',
+    identifiers: [['zigbee', '00:15:8d:00:02:aa:bb:cc']],
   },
 ]
 
@@ -77,8 +104,25 @@ export const SEN = {
   distance: 'sensor.bedroom_distance',
 }
 
+/** Unrelated entities the SEN0609 device also carries; detection must ignore them. */
+export const SEN_EXTRA = {
+  co2: 'sensor.bedroom_co2',
+  pm25: 'sensor.bedroom_pm25',
+  fan: 'fan.bedroom_fan',
+}
+
+/** The excluded devices' entities, kept out of the candidate set by the ESPHome scope. */
+export const EXCLUDED = {
+  catPresence: 'binary_sensor.silver_presence',
+  motion: 'binary_sensor.hallway_motion',
+}
+
 function esphome(entity_id: string, device_id: string): EntityRegistryEntry {
   return { entity_id, device_id, platform: 'esphome' }
+}
+
+function foreign(entity_id: string, device_id: string, platform: string): EntityRegistryEntry {
+  return { entity_id, device_id, platform }
 }
 
 export const entities: EntityRegistryEntry[] = [
@@ -94,6 +138,11 @@ export const entities: EntityRegistryEntry[] = [
   ...Object.values(LDZ).map((id) => esphome(id, 'dev_ld')),
   esphome(SEN.presence, 'dev_sen'),
   esphome(SEN.distance, 'dev_sen'),
+  esphome(SEN_EXTRA.co2, 'dev_sen'),
+  esphome(SEN_EXTRA.pm25, 'dev_sen'),
+  esphome(SEN_EXTRA.fan, 'dev_sen'),
+  foreign(EXCLUDED.catPresence, 'dev_cat', 'tractive'),
+  foreign(EXCLUDED.motion, 'dev_motion', 'mqtt'),
 ]
 
 function state(entity_id: string, value: string, attributes: HassState['attributes'] = {}): HassState {
@@ -125,5 +174,10 @@ export function initialStates(): HassState[] {
     state(LDZ.zoneType, 'Disabled', { options: ZONE_TYPE_OPTIONS }),
     state(SEN.presence, 'off', { device_class: 'presence' }),
     state(SEN.distance, '2.4', { device_class: 'distance', unit_of_measurement: 'm' }),
+    state(SEN_EXTRA.co2, '600', { device_class: 'carbon_dioxide', unit_of_measurement: 'ppm' }),
+    state(SEN_EXTRA.pm25, '8', { device_class: 'pm25', unit_of_measurement: 'µg/m³' }),
+    state(SEN_EXTRA.fan, 'on', {}),
+    state(EXCLUDED.catPresence, 'off', { device_class: 'presence' }),
+    state(EXCLUDED.motion, 'off', { device_class: 'motion' }),
   ]
 }

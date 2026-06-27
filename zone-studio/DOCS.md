@@ -10,9 +10,17 @@ sidebar with no extra port or login. It serves a single page application backed
 by a small server.
 
 The server connects to Home Assistant and shows your real sensors. It discovers
-ESPHome devices and entities, lists the rooms and devices it finds in the top bar
+ESPHome devices and entities, lists the radar candidates it finds in the top bar
 picker, and tracks live LD2450 targets on the canvas as people move. Pick a room
-and a device to view, and the canvas follows that device.
+and a device to view, and the canvas follows that device, drawing only the layers
+that device actually has.
+
+Discovery is scoped to ESPHome devices, so person and pet trackers, phones, and
+Zigbee or Z-Wave motion sensors never appear as candidates. A device is treated as
+a radar sensor only when it shows a confident signature (an LD2450 target X and Y
+pair, or the SEN0609 presence-with-distance signature) or you confirm it on the
+device mapping surface. A lone presence, occupancy or motion sensor is never enough
+on its own.
 
 For an LD2450 you can draw detection and exclusion zones on the canvas and apply
 them. A simple set (up to three axis-aligned rectangles under one mode) goes
@@ -32,8 +40,8 @@ message when there is nothing to draw:
 
 - Connecting: discovery is in progress.
 - Live: Home Assistant answered and at least one sensor was found.
-- No sensors: Home Assistant answered but no LD2450 or SEN0609 device was
-  detected. Check that the sensors are set up in ESPHome, then retry.
+- No sensors: Home Assistant answered but no ESPHome candidate was found. Check
+  that the sensors are set up in ESPHome, then retry.
 - Offline: the add-on could not reach the Home Assistant WebSocket API. It keeps
   retrying in the background; use Retry to check again.
 
@@ -121,15 +129,26 @@ a firmware quirk, not a fault in the add-on. If it affects your sensor, re-apply
 the zones from the editor after the device comes back, or save the applied zones
 through your ESPHome configuration so they are restored on boot.
 
-## Correcting a misdetected device
+## Confirming and correcting a device
 
 Detection is heuristic. It identifies an LD2450 by its per target x and y
 coordinate entities, its per zone region numbers, and a zone_type select, and a
-SEN0609 by its presence sensor. If a device is read wrongly, you can override it
-with a record under the add-on data directory (`/data/zone-studio.json`) that
-forces the device kind and the entity roles, including the zone region numbers and
-the zone_type select used by the apply path. Auto-detection only seeds the mapping
-where there is no override, so your correction persists across restarts.
+SEN0609 by a presence sensor together with a distance sensor on the same device.
+
+Open Device on the left to review what discovery matched for the selected device.
+There you can see the radar entities matched to each role with a confidence
+indicator, confirm the device as an LD2450 or a SEN0609, correct the entity matched
+to any role, or dismiss the device as not a radar sensor. A confirmed device stays
+mapped, and a dismissed device stays hidden, across restarts. The decisions persist
+as a mapping override in the add-on data directory (`/data/zone-studio.json`), which
+wins over auto-detection field by field, so a confident signature is only a
+starting point you can correct.
+
+If your Sense360 firmware declares a manufacturer or an `esphome: project: name`
+that matches Sense360, discovery prefers those devices and marks them as known
+Sense360 hardware. The match pattern is configurable with the `SENSE360_MATCH`
+environment variable. Firmware does not declare one today, so discovery offers all
+ESPHome devices until it does.
 
 ## Installation
 

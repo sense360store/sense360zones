@@ -132,6 +132,74 @@ export interface Device {
   id: string
   name: string
   sensors: Sensor[]
+  /**
+   * Discovery metadata for the mapping and confirmation surface. Present on every
+   * device the real provider offers; absent on the in-memory mock model. `sensors`
+   * holds only the confirmed or confidently detected radar sensors, so a device
+   * awaiting confirmation has an empty `sensors` array and a `candidate` that
+   * describes what discovery matched.
+   */
+  candidate?: DeviceCandidate
+}
+
+// ---- discovery / mapping confirmation ------------------------------------
+
+/**
+ * How sure discovery is that a device is a radar sensor:
+ *   - `confident`  a full radar entity signature was matched (LD2450 target X/Y
+ *                  pair, or the SEN0609 presence-with-distance signature),
+ *   - `none`       no radar signature; the device is offered for confirmation only.
+ */
+export type DetectionConfidence = 'confident' | 'none'
+
+/** One matched entity role, surfaced for review and correction. */
+export interface CandidateRole {
+  /** Stable key used to send a correction (e.g. `target1x`, `presence`, `zoneType`). */
+  key: string
+  /** Human label, e.g. `Target 1 · X`. */
+  label: string
+  /** The entity matched to this role, if any. */
+  entityId?: string
+}
+
+/**
+ * What discovery found for a candidate device, and the user's decision about it.
+ * Drives the mapping surface: the kind, the confidence indicator, the matched
+ * roles, and whether the device is confirmed or dismissed.
+ */
+export interface DeviceCandidate {
+  /** The detected or confirmed kind; null when nothing radar-like matched. */
+  kind: SensorKind | null
+  confidence: DetectionConfidence
+  /** The user confirmed this device as a radar sensor. */
+  confirmed: boolean
+  /** The user dismissed this device as not a radar sensor. */
+  dismissed: boolean
+  /** The device declares a recognisable Sense360 identity (known hardware). */
+  sense360: boolean
+  /** What the device reports to Home Assistant, shown so the operator can see it. */
+  manufacturer?: string
+  /** The ESPHome node name from the device identifiers. */
+  node?: string
+  /** The radar entities matched to each role. */
+  roles: CandidateRole[]
+}
+
+/**
+ * A confirmation, correction, or dismissal sent from the mapping surface. It rides
+ * on the write payload (see DeviceConfig.mapping) and is persisted as the device's
+ * mapping override, so the provider contract does not change. `roles` maps a role
+ * key to an entity id; an empty string clears that role.
+ */
+export interface MappingUpdate {
+  /** Confirm the device as this kind. */
+  kind?: SensorKind
+  /** Mark the device confirmed (kept mapped across restarts). */
+  confirmed?: boolean
+  /** Hide the device as not a radar sensor, or clear a previous dismissal. */
+  dismissed?: boolean
+  /** Role corrections as role-key → entity id (empty string clears the role). */
+  roles?: Record<string, string>
 }
 
 /** A room containing one or more devices. */

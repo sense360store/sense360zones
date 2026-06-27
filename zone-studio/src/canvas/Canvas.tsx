@@ -9,6 +9,14 @@ import { makeProjection, svgPointFromEvent } from './projection'
 
 export function Canvas() {
   const s = useEditorState()
+  const hasLd = s.sensors.includes('ld2450')
+  const hasSen = s.sensors.includes('sen0609')
+  // The canvas draws only the layers the device actually has. With no confirmed
+  // radar sensor there is nothing to draw, so invite the user to the mapping
+  // surface rather than render empty scenery.
+  if (!hasLd && !hasSen) return <CanvasEmptyState />
+  const showLd = s.layers.ld && hasLd
+  const showSen = s.layers.sen && hasSen
   const proj = makeProjection(s.view)
   const M = proj.scale
   const sx = proj.sx
@@ -117,7 +125,7 @@ export function Canvas() {
       </g>
 
       {/* LD2450 FoV wedge */}
-      {s.layers.ld && (
+      {showLd && (
         <g>
           {!isCeil && <polygon points={ldCone} fill="var(--greenSoft)" opacity="0.5"></polygon>}
           {isCeil && <circle cx={sx} cy={sy} r={ldDiscR} fill="var(--greenSoft)" opacity="0.45"></circle>}
@@ -125,7 +133,7 @@ export function Canvas() {
       )}
 
       {/* SEN0609 radial band layer */}
-      {s.layers.sen && (
+      {showSen && (
         <g>
           {!isCeil && (
             <g>
@@ -185,7 +193,7 @@ export function Canvas() {
       )}
 
       {/* LD2450 zones */}
-      {s.layers.ld && (
+      {showLd && (
         <g>
           {s.zones.map((z) => {
             const m = zoneMeta(z.type)
@@ -288,7 +296,7 @@ export function Canvas() {
       )}
 
       {/* LD2450 live targets + trails */}
-      {s.layers.ld && (
+      {showLd && (
         <g>
           {s.targets.map((t, i) => {
             const p = toPx(t.x, t.y)
@@ -311,7 +319,8 @@ export function Canvas() {
       <g
         onPointerDown={(e) => {
           e.stopPropagation()
-          store.selectLd()
+          if (hasLd) store.selectLd()
+          else store.selectBand()
         }}
         style={css('cursor:pointer;')}
       >
@@ -349,5 +358,34 @@ export function Canvas() {
         </text>
       </g>
     </svg>
+  )
+}
+
+/**
+ * Shown in place of the canvas when the active device has no confirmed radar
+ * sensor: a clear prompt to confirm or correct the mapping rather than an empty
+ * grid. Clicking opens the device mapping surface.
+ */
+function CanvasEmptyState() {
+  return (
+    <div
+      onClick={() => store.selectDeviceMapping()}
+      style={css(
+        'width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;cursor:pointer;color:var(--mut);padding:24px;',
+      )}
+    >
+      <div
+        style={css(
+          'width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--ins);border:1px solid var(--bd);font-size:22px;margin-bottom:16px;',
+        )}
+      >
+        📡
+      </div>
+      <div style={css('font-size:15px;font-weight:700;color:var(--tx);margin-bottom:8px;')}>No radar sensor confirmed</div>
+      <div style={css('font-size:12.5px;line-height:1.6;max-width:340px;')}>
+        This device has not been confirmed as an LD2450 or SEN0609. Open Device on the left to review what was detected,
+        confirm the sensor, correct a role, or dismiss the device if it is not a radar sensor.
+      </div>
+    </div>
   )
 }

@@ -42,6 +42,33 @@ describe('Persistence', () => {
     expect(b.getMappings()).toHaveProperty('dev_sen')
   })
 
+  it('round-trips a confirmation and a dismissal on the mapping override', () => {
+    const dir = tempDir()
+    const a = new Persistence(dir)
+    a.setMapping('dev_a', { kind: 'ld2450', confirmed: true })
+    a.setMapping('dev_b', { dismissed: true })
+
+    const b = new Persistence(dir)
+    expect(b.getMapping('dev_a')).toEqual({ kind: 'ld2450', confirmed: true })
+    expect(b.getMapping('dev_b')).toEqual({ dismissed: true })
+  })
+
+  it('merges a mapping patch without dropping untouched fields', () => {
+    const dir = tempDir()
+    const a = new Persistence(dir)
+    a.setMapping('dev', { kind: 'sen0609', roles: { presence: 'binary_sensor.p' } })
+    // A later correction must keep the kind and the presence role.
+    a.updateMapping('dev', { roles: { distance: 'sensor.d' } })
+    a.updateMapping('dev', { confirmed: true })
+
+    const b = new Persistence(dir)
+    expect(b.getMapping('dev')).toEqual({
+      kind: 'sen0609',
+      confirmed: true,
+      roles: { presence: 'binary_sensor.p', distance: 'sensor.d' },
+    })
+  })
+
   it('keeps mount and mapping independent for the same device', () => {
     const dir = tempDir()
     const a = new Persistence(dir)

@@ -3,7 +3,14 @@
  * which entity plays which role; a persisted override must win over auto-detection.
  */
 import { describe, expect, it } from 'vitest'
-import { detectKindAndRoles, resolveMapping } from '../server/ha/detect'
+import {
+  detectKindAndRoles,
+  detectSen0609Roles,
+  esphomeNode,
+  isSense360Device,
+  resolveDevice,
+  resolveMapping,
+} from '../server/ha/detect'
 import type { HassState } from '../server/ha/types'
 
 const noState = () => undefined
@@ -44,6 +51,31 @@ describe('detectKindAndRoles', () => {
     )
     expect(res?.kind).toBe('sen0609')
     expect(res?.roles.presence).toBe('binary_sensor.node_presence')
+    expect(res?.roles.distance).toBe('sensor.node_distance')
+  })
+
+  it('does not classify a device from a lone presence, occupancy or motion sensor', () => {
+    for (const deviceClass of ['presence', 'occupancy', 'motion']) {
+      const id = 'binary_sensor.node_presence'
+      const res = detectKindAndRoles(
+        [id],
+        stateMap({ [id]: { entity_id: id, state: 'off', attributes: { device_class: deviceClass } } }),
+      )
+      expect(res, `lone ${deviceClass} must not classify`).toBeNull()
+    }
+  })
+
+  it('picks the radar entities out of a busy device and ignores unrelated entities', () => {
+    const ids = ['binary_sensor.node_presence', 'sensor.node_distance', 'sensor.node_co2', 'fan.node_fan']
+    const res = detectKindAndRoles(
+      ids,
+      stateMap({
+        'binary_sensor.node_presence': { entity_id: 'binary_sensor.node_presence', state: 'on', attributes: { device_class: 'presence' } },
+        'sensor.node_distance': { entity_id: 'sensor.node_distance', state: '2.0', attributes: { device_class: 'distance' } },
+        'sensor.node_co2': { entity_id: 'sensor.node_co2', state: '600', attributes: { device_class: 'carbon_dioxide' } },
+      }),
+    )
+    expect(res?.kind).toBe('sen0609')
     expect(res?.roles.distance).toBe('sensor.node_distance')
   })
 
@@ -148,5 +180,72 @@ describe('resolveMapping with an override', () => {
   it('falls back to auto-detection where the override is silent', () => {
     const res = resolveMapping('dev', ids, noState, { kind: 'ld2450' })
     expect(res?.roles.targets[0]).toEqual({ x: 'sensor.node_target_1_x', y: 'sensor.node_target_1_y' })
+  })
+})
+
+describe('ESPHome and Sense360 identity', () => {
+  it('reads the ESPHome node name from the device identifiers', () => {
+    expect(esphomeNode({ identifiers: [['esphome', 'living-aabbcc']] })).toBe('living-aabbcc')
+    expect(esphomeNode({ identifiers: [['mac', 'aa:bb'], ['esphome', 'node-2']] })).toBe('node-2')
+  })
+
+  it('returns null for a non-ESPHome device', () => {
+    expect(esphomeNode({ identifiers: [['tractive', 'silver']] })).toBeNull()
+    expect(esphomeNode({ identifiers: [['zigbee', '00:15']] })).toBeNull()
+    expect(esphomeNode({})).toBeNull()
+  })
+
+  it('recognises a Sense360 identity in the manufacturer or model only when present', () => {
+    expect(isSense360Device({ manufacturer: 'Sense360', model: 'LD2450' })).toBe(true)
+    expect(isSense360Device({ manufacturer: 'Espressif', model: 'sense360.air' })).toBe(true)
+    // Today's firmware: no identity declared, so the prefilter must not match.
+    expect(isSense360Device({ manufacturer: 'HiLink', model: 'LD2450' })).toBe(false)
+    expect(isSense360Device({ manufacturer: 'DFRobot', model: 'SEN0609' })).toBe(false)
+  })
+
+  it('finds the SEN0609 signature only with both presence and distance', () => {
+    const presenceOnly = stateMap({
+      'binary_sensor.x': { entity_id: 'binary_sensor.x', state: 'off', attributes: { device_class: 'presence' } },
+    })
+    expect(detectSen0609Roles(['binary_sensor.x'], presenceOnly)).toBeNull()
+    const both = stateMap({
+      'binary_sensor.x': { entity_id: 'binary_sensor.x', state: 'off', attributes: { device_class: 'presence' } },
+      'sensor.d': { entity_id: 'sensor.d', state: '2', attributes: { device_class: 'distance' } },
+    })
+    expect(detectSen0609Roles(['binary_sensor.x', 'sensor.d'], both)).toEqual({
+      presence: 'binary_sensor.x',
+      distance: 'sensor.d',
+    })
+  })
+})
+
+describe('resolveDevice gating', () => {
+  const targets = ['sensor.node_target_1_x', 'sensor.node_target_1_y']
+
+  it('activates a device with a confident signature', () => {
+    const res = resolveDevice('dev', targets, noState)
+    expect(res.confidence).toBe('confident')
+    expect(res.confirmed).toBe(false)
+    expect(res.mapping?.kind).toBe('ld2450')
+  })
+
+  it('does not activate a device with no confident signature and no confirmation', () => {
+    const id = 'binary_sensor.node_presence'
+    const res = resolveDevice('dev', [id], stateMap({ [id]: { entity_id: id, state: 'off', attributes: { device_class: 'presence' } } }))
+    expect(res.kind).toBeNull()
+    expect(res.confidence).toBe('none')
+    expect(res.mapping).toBeNull()
+  })
+
+  it('activates a device once it is confirmed, even without a signature', () => {
+    const res = resolveDevice('dev', ['sensor.node_temperature'], noState, { kind: 'sen0609', confirmed: true })
+    expect(res.confirmed).toBe(true)
+    expect(res.mapping?.kind).toBe('sen0609')
+  })
+
+  it('keeps a dismissed device inactive even with a confident signature', () => {
+    const res = resolveDevice('dev', targets, noState, { dismissed: true })
+    expect(res.dismissed).toBe(true)
+    expect(res.mapping).toBeNull()
   })
 })
