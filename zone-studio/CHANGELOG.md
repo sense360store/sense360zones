@@ -4,6 +4,37 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-07-01
+
+### Changed
+
+- A usability and visual clarity pass, presentation and interaction feedback
+  only. The canvas reference layer (range rings, spokes, the field of view
+  wedge, the boresight line and the distance labels) is clearly readable in
+  both themes instead of washing into the background, while zones and targets
+  stay the most prominent layer. Zone names sit on small accent chips and the
+  live occupancy line ("occupied · 1 of 3") is legible over any background.
+- Clearer feedback and affordances: zones have distinct hover, selected and
+  occupied states, and hovering a zone list row highlights its zone on the
+  canvas and the reverse. The selected zone carries an outline glow and larger
+  resize and rotate handles with enlarged grab areas, the rotate handle shows
+  a rotate cursor, corner handles show directional resize cursors, and a
+  readout beside the pointer shows the live size, position, angle or radius
+  during every drag. Drawing a rectangle shows a rubber-band preview, and with
+  a draw tool active the pointer passes through existing zones so drawing
+  works anywhere on the canvas. Buttons, rows and segmented controls gained
+  hover states, and canvas labels can no longer be text-selected mid-drag.
+- Guidance in context: with no zones yet, the canvas, the zone list and the
+  inspector all point at the first action (choose Rect, then drag on the
+  canvas). The apply panel names the active profile as a pill and explains in
+  plain words whether Apply writes into the sensor itself or the add-on
+  evaluates the zones live over MQTT, and why. Jargon is reduced where a
+  plainer phrasing works: the boresight label reads "0° · straight ahead" and
+  the exclusion badge reads "mask".
+- Hierarchy and pointer comfort: the unsaved state is a filled pill next to
+  Apply, and small controls (icon buttons, selects, segmented buttons, the
+  drawer toggles) grew to comfortable pointer sizes at every width.
+
 ## [0.4.2] - 2026-07-01
 
 ### Changed
