@@ -4,6 +4,41 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-07-01
+
+### Changed
+
+- A visual and layout pass. The UI was ported from a fixed 1440 by 900 design
+  artboard and did not adapt to the ingress iframe; it is now fluid at any width.
+  The app root fills the iframe, the left panel, the canvas and the inspector
+  reflow as width shrinks, and below the drawer breakpoint the side panels slide
+  over the canvas behind Layers and Inspect toggles instead of squeezing or
+  overlapping it. The canvas scales to its container and keeps its aspect, so the
+  pointer to metre mapping stays exact.
+- The styling is consolidated into design tokens: CSS variables for colour, a
+  type scale, spacing and radii, per theme, in one stylesheet. The prototype's
+  inline styles are gone; components carry classes and pass only dynamic values
+  (zone accents, live coordinates) through custom properties. Both the light and
+  dark themes read from the same tokens and the theme toggle is unchanged.
+- Murecho and JetBrains Mono are bundled locally as woff2 files instead of being
+  loaded from the Google Fonts CDN, so the editor renders correctly on an
+  installation with no internet access.
+- UI copy no longer breaks sentences with dashes; the affected strings use
+  colons, commas, or separate sentences.
+
+### Fixed
+
+- The top-right collision between the inspector, the coordinate readout and the
+  grid readout. The live cursor and grid readouts moved into a HUD pinned to the
+  bottom-left corner of the canvas, out of every panel's way.
+- The mount legend ("Wall: coverage fans across the room") wrapping one word per
+  line; it now sits in a single-line chip and the toolbar wraps as a whole.
+- Canvas label collisions. Range ring labels moved to the left of the centre
+  line and the boresight label to the right of the line end, every canvas label
+  renders on a halo of the canvas colour so grid lines never strike through the
+  text, labels keep a constant on-screen size as the canvas scales, and a
+  small canvas shows a ring label only every second ring.
+
 ## [0.4.1] - 2026-06-27
 
 ### Changed

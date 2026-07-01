@@ -8,7 +8,6 @@
  * surfaced in Phase 3. `applyView` is the pure state->view mapping (split out so it
  * is unit-testable without rendering); `ApplyGuardrail` renders it.
  */
-import { css } from '../lib/css'
 import { resolveProfile, type ProfileResolution } from '../domain/profile'
 import type { SensorMount } from '../domain/types'
 import { isDirty, type EditorState } from '../store/store'
@@ -42,50 +41,38 @@ export function applyView(s: EditorState): ApplyView {
   return { resolution, dirty, canApply, applying, error: s.applyError, mqttAvailable: s.mqttAvailable }
 }
 
-const okBox = 'margin-top:4px;padding:10px 12px;border-radius:9px;background:var(--greenSoft);border:1px solid var(--green);'
-const polyBox = 'margin-top:4px;padding:10px 12px;border-radius:9px;background:var(--ins);border:1px solid var(--bd);'
-const warnBox = 'margin-top:8px;padding:9px 11px;border-radius:8px;background:var(--exclSoft);border:1px solid var(--excl);'
-
 /** Profile + what Apply does + apply error, pinned below the zone list. */
 export function ApplyGuardrail(props: { view: ApplyView }) {
   const { resolution, error, mqttAvailable } = props.view
   const polygon = resolution.profile === 'polygon'
   return (
-    <div style={css('padding:10px 18px 14px;border-top:1px solid var(--bd2);')}>
-      <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;margin-bottom:8px;')}>
-        APPLY PROFILE · {polygon ? 'POLYGON' : 'NATIVE'}
-      </div>
+    <div className="zs-guardrail">
+      <span className="zs-eyebrow">Apply profile · {polygon ? 'POLYGON' : 'NATIVE'}</span>
       {!polygon ? (
-        <div style={css(okBox + 'font-size:11.5px;color:var(--tx);line-height:1.5;')}>
+        <div className="zs-card zs-card--green">
           Up to three axis-aligned rectangles under one mode apply straight to the LD2450.
         </div>
       ) : (
-        <div style={css(polyBox)}>
-          <div style={css('font-size:11.5px;font-weight:700;color:var(--tx);margin-bottom:6px;')}>
-            Live occupancy over MQTT
-          </div>
-          <div style={css('font-size:11.5px;color:var(--tx);line-height:1.5;')}>
-            Occupancy is evaluated live by the add-on and published to Home Assistant over MQTT. The sensor is set to
-            report all targets. Generate an ESPHome config below for a durable on-device version.
-          </div>
-          <div style={css('margin-top:8px;font-size:11px;color:var(--mut);line-height:1.55;')}>
+        <div className="zs-card">
+          <div className="zs-guardrail__title">Live occupancy over MQTT</div>
+          Occupancy is evaluated live by the add-on and published to Home Assistant over MQTT. The sensor is set to
+          report all targets. Generate an ESPHome config below for a durable on-device version.
+          <div className="zs-guardrail__why">
             Why polygon, not native:
-            <ul style={css('margin:4px 0 0;padding-left:16px;')}>
+            <ul>
               {resolution.reasons.map((reason, i) => (
                 <li key={i}>{reason}</li>
               ))}
             </ul>
           </div>
           {mqttAvailable === false && (
-            <div style={css(warnBox + 'font-size:11px;color:var(--tx);line-height:1.5;')}>
+            <div className="zs-card zs-card--warn zs-guardrail__warn">
               The MQTT integration is required to publish these entities. The canvas preview still works without it.
             </div>
           )}
         </div>
       )}
-      {error && (
-        <div style={css('margin-top:8px;font-size:11.5px;color:var(--excl);line-height:1.5;')}>{error}</div>
-      )}
+      {error && <div className="zs-guardrail__error">{error}</div>}
     </div>
   )
 }

@@ -1,12 +1,5 @@
-import { css } from '../lib/css'
 import { store, useEditorState } from '../store/hooks'
 import type { Tool } from '../store/store'
-
-const segOn =
-  'height:28px;padding:0 12px;border-radius:6px;border:none;background:var(--green);color:#fff;font-family:Murecho;font-size:12.5px;font-weight:600;cursor:pointer;'
-const segOff =
-  'height:28px;padding:0 12px;border-radius:6px;border:none;background:transparent;color:var(--mut);font-family:Murecho;font-size:12.5px;font-weight:500;cursor:pointer;'
-const seg = (on: boolean) => (on ? segOn : segOff)
 
 const toolHints: Record<Tool, string> = {
   select: 'Click a zone to edit · drag to move · handles to resize/rotate',
@@ -18,61 +11,59 @@ const toolHints: Record<Tool, string> = {
 export function CanvasToolbar() {
   const s = useEditorState()
   const isCeil = s.view === 'ceiling'
-  const cur = s.cursor
-  const cursorReadout = cur ? `x ${cur.x.toFixed(2)}  y ${cur.y.toFixed(2)} m` : 'x —  y —'
-  const mountHint = isCeil ? '⊙ Ceiling — footprint looking straight down' : '▤ Wall — coverage fans across the room'
+  const mountHint = isCeil ? 'Ceiling: footprint looking straight down' : 'Wall: coverage fans across the room'
 
   return (
-    <div style={css('height:48px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;')}>
-      <div
-        style={css(
-          'display:flex;background:var(--panel);border:1px solid var(--bd);border-radius:9px;padding:3px;gap:2px;box-shadow:var(--shadow);',
-        )}
-      >
-        <button onClick={() => store.setView('ceiling')} style={css(seg(isCeil))} title="Ceiling mount — looking straight down">
+    <div className="zs-toolbar">
+      <div className="zs-seg">
+        <button
+          className={'zs-seg__btn' + (isCeil ? ' is-on' : '')}
+          onClick={() => store.setView('ceiling')}
+          title="Ceiling mount: looking straight down"
+        >
           ⊙ Ceiling
         </button>
-        <button onClick={() => store.setView('wall')} style={css(seg(!isCeil))} title="Wall mount — looking across the room">
+        <button
+          className={'zs-seg__btn' + (!isCeil ? ' is-on' : '')}
+          onClick={() => store.setView('wall')}
+          title="Wall mount: looking across the room"
+        >
           ▤ Wall
         </button>
       </div>
-      <div style={css('width:1px;height:22px;background:var(--bd);')}></div>
-      <div
-        style={css(
-          'display:flex;background:var(--panel);border:1px solid var(--bd);border-radius:9px;padding:3px;gap:2px;box-shadow:var(--shadow);',
-        )}
-      >
-        <button onClick={() => store.setTool('select')} style={css(seg(s.tool === 'select'))} title="Select & move">
+      <div className="zs-vdivider"></div>
+      <div className="zs-seg">
+        <button
+          className={'zs-seg__btn' + (s.tool === 'select' ? ' is-on' : '')}
+          onClick={() => store.setTool('select')}
+          title="Select & move"
+        >
           ▣ Select
         </button>
-        <button onClick={() => store.setTool('rect')} style={css(seg(s.tool === 'rect'))} title="Rectangle zone">
+        <button
+          className={'zs-seg__btn' + (s.tool === 'rect' ? ' is-on' : '')}
+          onClick={() => store.setTool('rect')}
+          title="Rectangle zone"
+        >
           ▭ Rect
         </button>
-        <button onClick={() => store.setTool('rot')} style={css(seg(s.tool === 'rot'))} title="Rotated rectangle">
+        <button
+          className={'zs-seg__btn' + (s.tool === 'rot' ? ' is-on' : '')}
+          onClick={() => store.setTool('rot')}
+          title="Rotated rectangle"
+        >
           ◇ Rotated
         </button>
-        <button onClick={() => store.setTool('poly')} style={css(seg(s.tool === 'poly'))} title="Polygon zone">
+        <button
+          className={'zs-seg__btn' + (s.tool === 'poly' ? ' is-on' : '')}
+          onClick={() => store.setTool('poly')}
+          title="Polygon zone"
+        >
           ⬡ Polygon
         </button>
       </div>
-      <span style={css('font-size:11px;color:var(--faint);')}>{toolHints[s.tool]}</span>
-      <span
-        style={css(
-          'font-size:11px;color:var(--mut);background:var(--ins);border:1px solid var(--bd);padding:3px 9px;border-radius:6px;font-weight:600;',
-        )}
-      >
-        {mountHint}
-      </span>
-      <div style={css('flex:1;')}></div>
-      <div
-        style={css(
-          "font-family:'JetBrains Mono';font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:13px;",
-        )}
-      >
-        <span>{cursorReadout}</span>
-        <span style={css('opacity:.5;')}>|</span>
-        <span>grid 0.5 m</span>
-      </div>
+      <span className="zs-legend">{mountHint}</span>
+      <span className="zs-toolbar__hint">{toolHints[s.tool]}</span>
     </div>
   )
 }

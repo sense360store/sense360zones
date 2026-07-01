@@ -9,15 +9,11 @@
  * (a documented manual step, see DOCS.md).
  */
 import { useState } from 'react'
-import { css } from '../lib/css'
 import { generateEsphomePackage } from '../domain/esphome'
 import type { SensorMount } from '../domain/types'
 import { useEditorState } from '../store/hooks'
 
 const DEFAULT_MOUNT: SensorMount = { surface: 'wall', height: 1.5, origin: { x: 0, y: 0 }, boresight: 0 }
-
-const buttonStyle =
-  'width:100%;height:32px;border-radius:8px;border:1px solid var(--bd);background:var(--ins);color:var(--tx);font-family:Murecho;font-size:12px;font-weight:600;cursor:pointer;'
 
 export function EsphomeExport() {
   const s = useEditorState()
@@ -53,58 +49,31 @@ export function EsphomeExport() {
   }
 
   return (
-    <div style={css('padding:0 18px 14px;')}>
-      <button onClick={() => setOpen(true)} style={css(buttonStyle)} title="Generate an ESPHome package for these zones">
+    <div className="zs-export">
+      <button className="zs-export__open" onClick={() => setOpen(true)} title="Generate an ESPHome package for these zones">
         Generate ESPHome config
       </button>
 
       {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={css(
-            'position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:24px;',
-          )}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={css(
-              'width:min(720px,100%);max-height:84vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;',
-            )}
-          >
-            <div style={css('padding:16px 20px;border-bottom:1px solid var(--bd2);display:flex;align-items:center;gap:12px;')}>
-              <div style={css('flex:1;')}>
-                <div style={css('font-size:14px;font-weight:700;color:var(--tx);')}>ESPHome config</div>
-                <div style={css('font-size:11.5px;color:var(--mut);margin-top:2px;')}>
+        <div className="zs-modal" onClick={() => setOpen(false)}>
+          <div className="zs-modal__box" onClick={(e) => e.stopPropagation()}>
+            <div className="zs-modal__head">
+              <div style={{ flex: 1 }}>
+                <div className="zs-modal__title">ESPHome config</div>
+                <div className="zs-modal__sub">
                   The durable on-device version of these zones. Add it to {deviceName} and flash. See DOCS.md.
                 </div>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                style={css(
-                  'width:30px;height:30px;flex:none;border-radius:7px;border:1px solid var(--bd);background:var(--ins);color:var(--mut);cursor:pointer;font-size:13px;',
-                )}
-              >
+              <button className="zs-btn zs-btn--icon" onClick={() => setOpen(false)}>
                 ✕
               </button>
             </div>
-            <textarea
-              readOnly
-              value={yaml}
-              spellCheck={false}
-              style={css(
-                "flex:1;min-height:300px;resize:none;border:none;outline:none;background:var(--canvas);color:var(--tx);font-family:'JetBrains Mono';font-size:12px;line-height:1.5;padding:16px 20px;white-space:pre;overflow:auto;",
-              )}
-            />
-            <div style={css('padding:12px 20px;border-top:1px solid var(--bd2);display:flex;gap:10px;justify-content:flex-end;')}>
-              <button onClick={download} style={css(buttonStyle + 'width:auto;padding:0 16px;')}>
+            <textarea className="zs-modal__code" readOnly value={yaml} spellCheck={false} />
+            <div className="zs-modal__actions">
+              <button className="zs-btn zs-btn--quiet" onClick={download}>
                 Download .yaml
               </button>
-              <button
-                onClick={copy}
-                style={css(
-                  'height:32px;padding:0 16px;border-radius:8px;border:1px solid var(--green);background:var(--green);color:#fff;font-family:Murecho;font-size:12px;font-weight:700;cursor:pointer;',
-                )}
-              >
+              <button className="zs-btn zs-btn--primary zs-btn--sm" onClick={copy}>
                 {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
