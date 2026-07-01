@@ -47,18 +47,26 @@ export function ApplyGuardrail(props: { view: ApplyView }) {
   const polygon = resolution.profile === 'polygon'
   return (
     <div className="zs-guardrail">
-      <span className="zs-eyebrow">Apply profile · {polygon ? 'POLYGON' : 'NATIVE'}</span>
+      <div className="zs-guardrail__head">
+        <span className="zs-eyebrow">Apply profile</span>
+        <span className={'zs-profpill ' + (polygon ? 'zs-profpill--polygon' : 'zs-profpill--native')}>
+          {polygon ? 'POLYGON' : 'NATIVE'}
+        </span>
+      </div>
       {!polygon ? (
         <div className="zs-card zs-card--green">
-          Up to three axis-aligned rectangles under one mode apply straight to the LD2450.
+          <div className="zs-guardrail__title">Written straight to the sensor</div>
+          This set fits the LD2450's own zone slots: up to three straight rectangles of one type. Apply writes them
+          directly into the sensor.
         </div>
       ) : (
         <div className="zs-card">
-          <div className="zs-guardrail__title">Live occupancy over MQTT</div>
-          Occupancy is evaluated live by the add-on and published to Home Assistant over MQTT. The sensor is set to
-          report all targets. Generate an ESPHome config below for a durable on-device version.
+          <div className="zs-guardrail__title">Evaluated live by the add-on</div>
+          This set needs more than the sensor's three built-in rectangles, so Apply sets the sensor to report all
+          targets and the add-on evaluates the zones, publishing occupancy to Home Assistant over MQTT. Generate an
+          ESPHome config below for a durable on-device version.
           <div className="zs-guardrail__why">
-            Why polygon, not native:
+            Why this set does not fit on the sensor:
             <ul>
               {resolution.reasons.map((reason, i) => (
                 <li key={i}>{reason}</li>

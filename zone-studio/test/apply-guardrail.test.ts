@@ -103,7 +103,7 @@ describe('ApplyGuardrail rendering', () => {
   it('renders the native profile when eligible', () => {
     const html = renderToStaticMarkup(createElement(ApplyGuardrail, { view: applyView(state({ zones: [Z0] })) }))
     expect(html).toContain('NATIVE')
-    expect(html).toContain('apply straight to the LD2450')
+    expect(html).toContain('writes them directly into the sensor')
   })
 })
 
