@@ -1,6 +1,6 @@
 name: Sense360 Zone Studio
 slug: sense360_zone_studio
-version: "0.4.1"
+version: "0.4.2"
 description: Configure radar detection and exclusion zones for LD2450 and SEN0609 sensors
 url: https://github.com/sense360store/sense360zones
 arch:

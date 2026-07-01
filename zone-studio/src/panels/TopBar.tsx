@@ -1,15 +1,7 @@
 import type { ConnectionState } from '../store/store'
-import { css } from '../lib/css'
+import { cssVars } from '../lib/css'
 import { store, useEditorState } from '../store/hooks'
 import { applyView } from './ApplyGuardrail'
-
-const applyStyleOn =
-  'height:34px;padding:0 18px;border-radius:8px;border:1px solid var(--green);background:var(--green);color:#fff;font-family:Murecho;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 0 16px var(--greenSoft);'
-const applyStyleOff =
-  'height:34px;padding:0 18px;border-radius:8px;border:1px solid var(--bd);background:var(--ins);color:var(--faint);font-family:Murecho;font-size:13px;font-weight:600;cursor:default;'
-
-const selectStyle =
-  'height:30px;max-width:190px;padding:0 8px;border-radius:7px;border:1px solid var(--bd);background:var(--ins);color:var(--tx);font-family:Murecho;font-size:12.5px;cursor:pointer;'
 
 /** Status dot colour and label per connection state. */
 function connStatus(state: ConnectionState): { label: string; color: string; pulse: boolean } {
@@ -19,7 +11,7 @@ function connStatus(state: ConnectionState): { label: string; color: string; pul
     case 'connecting':
       return { label: 'connecting', color: 'var(--mut)', pulse: true }
     case 'no-devices':
-      return { label: 'no sensors', color: '#e0922a', pulse: false }
+      return { label: 'no sensors', color: 'var(--warn)', pulse: false }
     case 'offline':
       return { label: 'offline', color: 'var(--excl)', pulse: false }
   }
@@ -36,41 +28,31 @@ export function TopBar() {
   const themeIcon = s.theme === 'dark' ? '☾' : '☀'
 
   return (
-    <div
-      style={css(
-        'height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--bd);z-index:5;',
-      )}
-    >
-      <div style={css('display:flex;align-items:center;gap:10px;')}>
-        <div
-          style={css(
-            'width:26px;height:26px;border-radius:7px;background:var(--green);display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px var(--greenSoft);',
-          )}
-        >
-          <div style={css('width:9px;height:9px;border-radius:50%;background:#fff;opacity:.92;')}></div>
+    <div className="zs-topbar">
+      <div className="zs-brand">
+        <div className="zs-brand__mark">
+          <div className="zs-brand__dot"></div>
         </div>
-        <div style={css('font-weight:700;font-size:15px;letter-spacing:.2px;')}>
-          Sense360 <span style={css('color:var(--green);')}>Zone Studio</span>
+        <div className="zs-brand__name">
+          Sense360 <em>Zone Studio</em>
         </div>
       </div>
-      <div style={css('width:1px;height:24px;background:var(--bd);')}></div>
+      <div className="zs-vdivider"></div>
 
       {/* Connection status + room/device picker, driven by discover(). */}
-      <div style={css('display:flex;align-items:center;gap:10px;')}>
+      <div className="zs-conn">
         <span
-          style={css(
-            `width:7px;height:7px;border-radius:50%;flex:none;background:${status.color};box-shadow:0 0 8px ${status.color};` +
-              (status.pulse ? 'animation:pulsedot 2.4s infinite;' : ''),
-          )}
+          className={'zs-conn__dot' + (status.pulse ? ' is-pulsing' : '')}
+          style={cssVars({ '--conn-color': status.color })}
         ></span>
         {s.rooms.length > 0 ? (
-          <div style={css('display:flex;align-items:center;gap:8px;')}>
+          <>
             {s.rooms.length > 1 && (
               <select
+                className="zs-select"
                 value={s.activeRoomId}
                 onChange={(e) => store.setActiveRoom(e.target.value)}
                 title="Room"
-                style={css(selectStyle)}
               >
                 {s.rooms.map((r) => (
                   <option key={r.id} value={r.id}>
@@ -80,10 +62,10 @@ export function TopBar() {
               </select>
             )}
             <select
+              className="zs-select"
               value={s.activeDeviceId}
               onChange={(e) => store.selectDevice(e.target.value)}
               title="Device"
-              style={css(selectStyle)}
             >
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -91,60 +73,41 @@ export function TopBar() {
                 </option>
               ))}
             </select>
-            <span style={css('font-size:11.5px;color:var(--faint);')}>{status.label}</span>
-          </div>
+            <span className="zs-conn__label">{status.label}</span>
+          </>
         ) : (
-          <span style={css('font-size:12.5px;color:var(--mut);')}>{status.label}</span>
+          <span className="zs-conn__label">{status.label}</span>
         )}
       </div>
 
-      <div style={css('flex:1;')}></div>
-      <div
-        onClick={() => store.toggleTheme()}
-        title="Toggle theme"
-        style={css(
-          'display:flex;align-items:center;gap:7px;height:32px;padding:0 5px 0 12px;border:1px solid var(--bd);border-radius:20px;background:var(--ins);cursor:pointer;margin-right:4px;',
+      <div className="zs-topbar__spacer"></div>
+      <div className="zs-topbar__actions">
+        <div className="zs-theme" onClick={() => store.toggleTheme()} title="Toggle theme">
+          <span className="zs-theme__label">{themeLabel}</span>
+          <span className="zs-theme__knob">{themeIcon}</span>
+        </div>
+        {view.error && (
+          <span className="zs-topbar__error" title={view.error}>
+            {view.error}
+          </span>
         )}
-      >
-        <span style={css('font-size:11.5px;color:var(--mut);font-weight:500;')}>{themeLabel}</span>
-        <span
-          style={css(
-            'width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--panel);border:1px solid var(--bd);font-size:12px;',
-          )}
+        {!view.error && dirty && <span className="zs-topbar__dirty">Unsaved</span>}
+        <button className="zs-btn" onClick={() => void store.revert()}>
+          Revert
+        </button>
+        <button
+          className="zs-btn zs-btn--primary"
+          onClick={() => void store.apply()}
+          disabled={!view.canApply}
+          title={
+            view.resolution.profile === 'polygon'
+              ? 'Apply: live occupancy evaluated by the add-on and published to Home Assistant over MQTT'
+              : 'Apply to sensors'
+          }
         >
-          {themeIcon}
-        </span>
+          {view.applying ? 'Applying…' : 'Apply to sensors'}
+        </button>
       </div>
-      {view.error && (
-        <span title={view.error} style={css('font-size:11.5px;color:var(--excl);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;')}>
-          {view.error}
-        </span>
-      )}
-      {!view.error && dirty && (
-        <span style={css('font-size:11.5px;color:#e0922a;display:flex;align-items:center;gap:6px;')}>
-          <span style={css('width:6px;height:6px;border-radius:50%;background:#e0922a;')}></span>Unsaved
-        </span>
-      )}
-      <button
-        onClick={() => void store.revert()}
-        style={css(
-          'height:34px;padding:0 16px;border-radius:8px;border:1px solid var(--bd);background:transparent;color:var(--mut);font-family:Murecho;font-size:13px;font-weight:500;cursor:pointer;',
-        )}
-      >
-        Revert
-      </button>
-      <button
-        onClick={() => void store.apply()}
-        disabled={!view.canApply}
-        title={
-          view.resolution.profile === 'polygon'
-            ? 'Apply: live occupancy evaluated by the add-on and published to Home Assistant over MQTT'
-            : 'Apply to sensors'
-        }
-        style={css(view.canApply ? applyStyleOn : applyStyleOff)}
-      >
-        {view.applying ? 'Applying…' : 'Apply to sensors'}
-      </button>
     </div>
   )
 }

@@ -1,5 +1,5 @@
-import { css } from '../lib/css'
 import { occupancyCounts, zoneMeta } from '../domain/geometry'
+import { cssVars } from '../lib/css'
 import { store, useEditorState } from '../store/hooks'
 import { ApplyGuardrail, applyView } from './ApplyGuardrail'
 import { EsphomeExport } from './EsphomeExport'
@@ -49,58 +49,38 @@ export function LeftPanel() {
   const layers = allLayers.filter((L) => (L.key === 'ld' ? hasLd : hasSen))
 
   return (
-    <div
-      style={css(
-        'width:288px;flex:none;background:var(--panel);border-right:1px solid var(--bd);display:flex;flex-direction:column;min-height:0;',
-      )}
-    >
-      <div style={css('padding:15px 18px 12px;border-bottom:1px solid var(--bd2);')}>
-        <div style={css('display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;')}>
-          <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;')}>LAYERS</div>
+    <>
+      <div className="zs-section zs-layers">
+        <div className="zs-section__head">
+          <span className="zs-eyebrow">Layers</span>
           <button
+            className={'zs-devbtn' + (s.sel.kind === 'device' ? ' is-on' : '')}
             onClick={() => store.selectDeviceMapping()}
             title="Device mapping and confirmation"
-            style={css(
-              `font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ${
-                s.sel.kind === 'device' ? 'var(--green)' : 'var(--bd)'
-              };background:var(--ins);color:var(--mut);`,
-            )}
           >
             Device
           </button>
         </div>
         {layers.length === 0 && (
-          <div style={css('font-size:11.5px;color:var(--faint);line-height:1.5;padding:4px 2px 8px;')}>
+          <div className="zs-note zs-layers__empty">
             No confirmed radar sensor on this device. Open Device to confirm or correct the mapping.
           </div>
         )}
         {layers.map((L) => (
-          <div
-            key={L.key}
-            style={css(
-              `display:flex;align-items:center;gap:10px;padding:9px 9px;border-radius:9px;margin-bottom:3px;border:1px solid ${
-                L.selected ? 'var(--bd)' : 'transparent'
-              };background:${L.selected ? 'var(--ins)' : 'transparent'};`,
-            )}
-          >
+          <div key={L.key} className={'zs-row' + (L.selected ? ' is-selected' : '')}>
             <span
-              style={css(`width:11px;height:11px;border-radius:3px;flex:none;background:${L.accent};opacity:${L.vis ? 1 : 0.3};`)}
+              className={'zs-swatch' + (L.vis ? '' : ' is-off')}
+              style={cssVars({ '--swatch-bg': L.accent })}
             ></span>
-            <div onClick={L.select} style={css('flex:1;min-width:0;cursor:pointer;')}>
-              <div style={css('font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;')}>
-                {L.name}
-              </div>
-              <div style={css('font-size:10.5px;color:var(--faint);')}>{L.sub}</div>
+            <div className="zs-row__body is-clickable" onClick={L.select}>
+              <div className="zs-row__title">{L.name}</div>
+              <div className="zs-row__sub">{L.sub}</div>
             </div>
-            <span style={css("font-size:10px;font-family:'JetBrains Mono';color:var(--faint);")}>{L.meta}</span>
+            <span className="zs-row__meta">{L.meta}</span>
             <button
+              className={'zs-iconbtn' + (L.vis ? '' : ' is-off')}
               onClick={() => store.toggleLayer(L.key)}
               title="Toggle visibility"
-              style={css(
-                `width:26px;height:26px;border-radius:7px;border:1px solid var(--bd);background:var(--ins);color:${
-                  L.vis ? 'var(--mut)' : 'var(--faint)'
-                };cursor:pointer;font-size:12px;flex:none;`,
-              )}
             >
               {L.vis ? '👁' : '⦸'}
             </button>
@@ -109,63 +89,43 @@ export function LeftPanel() {
       </div>
 
       {hasLd && (
-        <div style={css('padding:14px 18px 8px;display:flex;align-items:center;justify-content:space-between;')}>
-          <div style={css('font-size:10.5px;letter-spacing:1.4px;color:var(--faint);font-weight:700;')}>
-            LD2450 ZONES · {s.zones.length}
-          </div>
+        <div className="zs-zonelist__head">
+          <span className="zs-eyebrow">LD2450 zones · {s.zones.length}</span>
         </div>
       )}
-      <div style={css('flex:1;overflow-y:auto;padding:2px 12px 12px;min-height:0;')}>
+      <div className="zs-zonelist">
         {hasLd &&
           s.zones.map((z) => {
-          const m = zoneMeta(z.type)
-          const isExcl = z.type === 'exclusion'
-          const cnt = occ[z.id] || 0
-          const cnumActive = isExcl ? false : cnt > 0
-          const selected = s.sel.kind === 'zone' && s.sel.id === z.id
-          const shapeLabel = z.shape === 'poly' ? 'polygon' : z.rot ? 'rotated' : 'rect'
-          return (
-            <div
-              key={z.id}
-              onClick={() => store.selectZone(z.id)}
-              style={css(
-                `display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;margin-bottom:3px;cursor:pointer;border:1px solid ${
-                  selected ? 'var(--green)' : 'transparent'
-                };background:${selected ? 'var(--greenSoft)' : 'transparent'};`,
-              )}
-            >
-              <span
-                style={css(`width:11px;height:11px;border-radius:3px;flex:none;background:${m.soft};border:1.5px solid ${m.accent};`)}
-              ></span>
-              <div style={css('flex:1;min-width:0;')}>
-                <div
-                  style={css(
-                    'font-size:13px;font-weight:500;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
-                  )}
-                >
-                  {z.name}
-                </div>
-                <div style={css('font-size:10.5px;color:var(--faint);')}>
-                  {m.label} · {shapeLabel}
-                </div>
-              </div>
-              <span
-                style={css(
-                  `font-size:10px;font-family:'JetBrains Mono';padding:2px 7px;border-radius:5px;flex:none;` +
-                    (isExcl
-                      ? 'color:var(--excl);background:var(--exclSoft);'
-                      : cnumActive
-                        ? 'color:#fff;background:var(--green);'
-                        : 'color:var(--faint);background:var(--ins);'),
-                )}
+            const m = zoneMeta(z.type)
+            const isExcl = z.type === 'exclusion'
+            const cnt = occ[z.id] || 0
+            const cnumActive = isExcl ? false : cnt > 0
+            const selected = s.sel.kind === 'zone' && s.sel.id === z.id
+            const shapeLabel = z.shape === 'poly' ? 'polygon' : z.rot ? 'rotated' : 'rect'
+            return (
+              <div
+                key={z.id}
+                className={'zs-row is-clickable' + (selected ? ' is-selected--green' : '')}
+                onClick={() => store.selectZone(z.id)}
               >
-                {isExcl ? 'excl' : cnt + '/3'}
-              </span>
-            </div>
+                <span
+                  className="zs-swatch zs-swatch--outline"
+                  style={cssVars({ '--swatch-bg': m.soft, '--swatch-bd': m.accent })}
+                ></span>
+                <div className="zs-row__body">
+                  <div className="zs-row__title zs-row__title--regular">{z.name}</div>
+                  <div className="zs-row__sub">
+                    {m.label} · {shapeLabel}
+                  </div>
+                </div>
+                <span className={'zs-badge' + (isExcl ? ' is-excl' : cnumActive ? ' is-on' : '')}>
+                  {isExcl ? 'excl' : cnt + '/3'}
+                </span>
+              </div>
             )
           })}
         {hasLd && (
-          <div style={css('font-size:11px;color:var(--faint);padding:8px 10px;line-height:1.5;')}>
+          <div className="zs-note zs-zonelist__note">
             Draw tools live on the canvas toolbar. SEN0609 has no drawable zones, only its radial band.
           </div>
         )}
@@ -179,6 +139,6 @@ export function LeftPanel() {
           <EsphomeExport />
         </>
       )}
-    </div>
+    </>
   )
 }

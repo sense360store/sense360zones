@@ -1,4 +1,3 @@
-import { css } from '../lib/css'
 import type { ConnectionState } from '../store/store'
 
 /** The message shown for a non-connected state. `null` means render nothing. */
@@ -46,36 +45,17 @@ export function ConnectionOverlay(props: { state: ConnectionState; onRetry: () =
   const view = connectionView(props.state)
   if (!view) return null
   return (
-    <div
-      style={css(
-        'position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:var(--canvas);',
-      )}
-    >
-      <div style={css('max-width:400px;text-align:center;padding:28px;')}>
+    <div className="zs-conn-overlay">
+      <div className="zs-conn-overlay__box">
         {view.showSpinner ? (
-          <div
-            style={css(
-              'width:34px;height:34px;margin:0 auto 18px;border-radius:50%;border:3px solid var(--bd);border-top-color:var(--green);animation:zsspin 0.9s linear infinite;',
-            )}
-          ></div>
+          <div className="zs-conn-overlay__spinner"></div>
         ) : (
-          <div
-            style={css(
-              'width:34px;height:34px;margin:0 auto 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--ins);border:1px solid var(--bd);color:var(--faint);font-size:18px;',
-            )}
-          >
-            ⚠
-          </div>
+          <div className="zs-conn-overlay__icon">⚠</div>
         )}
-        <div style={css('font-size:17px;font-weight:700;margin-bottom:8px;')}>{view.title}</div>
-        <div style={css('font-size:13px;line-height:1.6;color:var(--mut);')}>{view.body}</div>
+        <div className="zs-conn-overlay__title">{view.title}</div>
+        <div className="zs-conn-overlay__body">{view.body}</div>
         {view.showRetry && (
-          <button
-            onClick={props.onRetry}
-            style={css(
-              'margin-top:18px;height:34px;padding:0 18px;border-radius:8px;border:1px solid var(--green);background:var(--green);color:#fff;font-family:Murecho;font-size:13px;font-weight:700;cursor:pointer;',
-            )}
-          >
+          <button className="zs-btn zs-btn--primary" onClick={props.onRetry}>
             Retry
           </button>
         )}

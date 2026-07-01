@@ -11,36 +11,52 @@
  *   - panels/   the top bar, layer/zone list, and the context inspector
  *
  * This file is just the layout: it wires the panels around the canvas and
- * applies the theme class. All state flows through the store and the client.
+ * applies the theme class. The layout is fluid — the root fills the ingress
+ * iframe, and below the drawer breakpoint (styles/zonestudio.css) the side
+ * panels slide over the canvas behind the two floating toggles held here.
+ * All data state flows through the store and the client.
  */
+import { useState } from 'react'
 import { Canvas } from './canvas/Canvas'
 import { CanvasToolbar } from './canvas/CanvasToolbar'
-import { css } from './lib/css'
 import { ConnectionOverlay } from './panels/ConnectionOverlay'
 import { Inspector } from './panels/Inspector'
 import { LeftPanel } from './panels/LeftPanel'
 import { TopBar } from './panels/TopBar'
 import { store, useEditorState } from './store/hooks'
 
+type Drawer = 'layers' | 'inspector' | null
+
 export default function ZoneStudio() {
   const s = useEditorState()
+  // Which side panel is open when the panels are drawers (narrow widths only;
+  // at comfortable widths CSS keeps both panels in the flow and ignores this).
+  const [drawer, setDrawer] = useState<Drawer>(null)
+  const toggle = (which: Drawer) => setDrawer((cur) => (cur === which ? null : which))
+
   return (
-    <div
-      className={'zs ' + (s.theme === 'dark' ? 'dark' : '')}
-      style={css(
-        'width:100vw;height:100vh;background:var(--bg);color:var(--tx);font-family:Murecho,sans-serif;display:flex;flex-direction:column;overflow:hidden;position:relative;-webkit-font-smoothing:antialiased;',
-      )}
-    >
+    <div className={'zs ' + (s.theme === 'dark' ? 'dark' : '')}>
       <TopBar />
-      <div style={css('flex:1;display:flex;min-height:0;position:relative;')}>
-        <LeftPanel />
-        <div style={css('flex:1;min-width:0;background:var(--canvas);display:flex;flex-direction:column;position:relative;')}>
+      <div className="zs-main">
+        <div className={'zs-side zs-side--left' + (drawer === 'layers' ? ' is-open' : '')}>
+          <LeftPanel />
+        </div>
+        <div className="zs-canvas-col">
           <CanvasToolbar />
-          <div style={css('flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:0 14px 14px;')}>
+          <div className="zs-stagewrap">
             <Canvas />
           </div>
+          <button className="zs-drawer-toggle zs-drawer-toggle--left" onClick={() => toggle('layers')}>
+            Layers
+          </button>
+          <button className="zs-drawer-toggle zs-drawer-toggle--right" onClick={() => toggle('inspector')}>
+            Inspect
+          </button>
         </div>
-        <Inspector />
+        <div className={'zs-side zs-side--right' + (drawer === 'inspector' ? ' is-open' : '')}>
+          <Inspector />
+        </div>
+        {drawer && <button className="zs-scrim" aria-label="Close panel" onClick={() => setDrawer(null)} />}
         {/* Honest connection/empty state over the editor; hidden when connected. */}
         <ConnectionOverlay state={s.connection} onRetry={() => store.refresh()} />
       </div>

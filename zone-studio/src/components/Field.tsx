@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import type { CSSProperties } from 'react'
 
 /**
  * Controlled-on-commit input. Mirrors the prototype's text/number fields, which
@@ -12,9 +11,9 @@ export function Field(props: {
   onCommit: (val: string) => void
   type?: string
   step?: string
-  style: CSSProperties
+  className?: string
 }) {
-  const { value, onCommit, type = 'text', step, style } = props
+  const { value, onCommit, type = 'text', step, className } = props
   const [local, setLocal] = useState(value)
   const [focused, setFocused] = useState(false)
 
@@ -26,7 +25,7 @@ export function Field(props: {
     <input
       type={type}
       step={step}
-      style={style}
+      className={className}
       value={local}
       onChange={(e) => setLocal(e.target.value)}
       onFocus={() => setFocused(true)}
