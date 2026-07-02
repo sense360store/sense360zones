@@ -53,6 +53,12 @@ describe('API routes (guard off)', () => {
     expect(res.json()).toEqual({ status: 'ok' })
   })
 
+  it('reports the provider status', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/status' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ha: 'connected', mqtt: null })
+  })
+
   it('discovers rooms', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/discover' })
     expect(res.statusCode).toBe(200)

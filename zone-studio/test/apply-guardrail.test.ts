@@ -125,6 +125,9 @@ class StubClient implements ZonesClient {
   async discover(): Promise<Room[]> {
     return seed([]).rooms
   }
+  async status() {
+    return { ha: 'connected' as const, mqtt: null }
+  }
   async writeConfig(_id: string, cfg: DeviceConfig): Promise<void> {
     if (this.writeError) throw new Error(this.writeError)
     this.writes.push(clone(cfg))

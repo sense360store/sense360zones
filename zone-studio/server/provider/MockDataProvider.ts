@@ -18,7 +18,7 @@
  */
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../../src/domain/constants'
 import type { BandConfig, Device, Room, Sensor, Target, Zone } from '../../src/domain/types'
-import type { DataProvider, DeviceConfig, TargetListener, Unsubscribe } from './DataProvider'
+import type { DataProvider, DeviceConfig, ProviderStatus, TargetListener, Unsubscribe } from './DataProvider'
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
@@ -113,6 +113,11 @@ export class MockDataProvider implements DataProvider {
       if (s.kind === 'ld2450') s.zones = clone(config.zones)
       if (s.kind === 'sen0609') s.band = clone(config.band)
     }
+  }
+
+  /** The simulation has no upstream, so it is always connected and MQTT-less. */
+  status(): ProviderStatus {
+    return { ha: 'connected', mqtt: null }
   }
 
   subscribeTargets(_deviceId: string, onSample: TargetListener): Unsubscribe {

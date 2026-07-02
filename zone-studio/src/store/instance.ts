@@ -28,3 +28,7 @@ const emptySeed: Seed = { rooms: [], activeRoomId: '', activeDeviceId: '', zones
 export const store = new ZoneStudioStore(client, emptySeed)
 
 void store.refresh()
+// Self-recovery: offline and no-devices re-discover in the background, and the
+// connected state is watched with a status heartbeat, so the UI returns to the
+// live view on its own when Home Assistant, a device, or MQTT comes back.
+store.startAutoRecovery()

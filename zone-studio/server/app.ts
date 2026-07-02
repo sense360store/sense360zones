@@ -47,6 +47,10 @@ export async function buildServer(cfg: ServerConfig, provider: DataProvider): Pr
   // ---- API -----------------------------------------------------------------
   await app.register(
     async (api) => {
+      // Live provider health. The frontend polls this while connected (and after
+      // a failure) so the UI leaves and re-enters the live view on its own.
+      api.get('/status', async () => provider.status())
+
       api.get('/discover', async () => provider.discover())
 
       api.get<{ Params: { deviceId: string } }>('/config/:deviceId', async (req) =>

@@ -41,9 +41,17 @@ message when there is nothing to draw:
 - Connecting: discovery is in progress.
 - Live: Home Assistant answered and at least one sensor was found.
 - No sensors: Home Assistant answered but no ESPHome candidate was found. Check
-  that the sensors are set up in ESPHome, then retry.
-- Offline: the add-on could not reach the Home Assistant WebSocket API. It keeps
-  retrying in the background; use Retry to check again.
+  that the sensors are set up in ESPHome.
+- Offline: the add-on could not reach the Home Assistant WebSocket API. This is
+  normal while Home Assistant restarts.
+
+Every state recovers on its own: the offline and no-sensors screens keep
+re-checking in the background and return to the editor when the connection is
+restored or a device appears, and the live view watches the connection so a
+dropped Home Assistant is noticed within seconds. Unsaved edits survive a
+reconnect. The Retry button stays available but is rarely needed. If the MQTT
+integration was missing when polygon zones were applied, the add-on keeps
+retrying and publishes the occupancy entities as soon as MQTT comes online.
 
 The add-on never shows simulated data in place of a real connection.
 
