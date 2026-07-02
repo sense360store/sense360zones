@@ -62,6 +62,9 @@ const RECOVERY_RETRY_MS = 5000
 const RECOVERY_HEARTBEAT_MS = 5000
 const RECOVERY_GRACE_POLLS = 2
 
+/** Maximum undo depth. Older steps fall off the back of the history. */
+const HISTORY_LIMIT = 50
+
 export type Selection =
   | { kind: 'zone'; id: string }
   | { kind: 'sen' } // SEN0609 radial band
@@ -115,6 +118,24 @@ export interface EditorState {
    * when polygon and MQTT is unavailable, so the editor can state it is required.
    */
   mqttAvailable: boolean | null
+  /** Whether an undo / redo step is available. Drives the toolbar controls. */
+  canUndo: boolean
+  canRedo: boolean
+}
+
+/**
+ * One step of the authored editing session, as it was before an edit. Undo and
+ * redo restore exactly this: the working copy (zones, band, mount), the mount
+ * view toggle, and the selection — never the device, the connection, or the
+ * apply lifecycle. `saved` is deliberately not captured, so stepping through
+ * history recomputes dirtiness against the unchanged device baseline.
+ */
+interface HistoryEntry {
+  zones: Zone[]
+  band: BandConfig
+  mount: SensorMount | null
+  view: View
+  sel: Selection
 }
 
 /** Imperative drag handle — non-reactive, mirrors the old `this.h`. */
@@ -219,6 +240,8 @@ export class ZoneStudioStore {
       applyState: 'idle',
       applyError: null,
       mqttAvailable: null,
+      canUndo: false,
+      canRedo: false,
     }
     this.resub(seed.activeDeviceId)
   }
@@ -256,6 +279,9 @@ export class ZoneStudioStore {
       const zones = keepEdit ? this.state.zones : cfg.zones
       const band = keepEdit ? this.state.band : cfg.band
       const keepSel = Boolean(opts.background) && sameDevice && selectionValid(this.state.sel, sensors, zones)
+      // A kept edit keeps its undo history; a working copy reloaded from the
+      // device starts a fresh editing session.
+      if (!keepEdit) this.clearHistory()
       this.resub(device.id)
       this.set({
         rooms,
@@ -382,6 +408,7 @@ export class ZoneStudioStore {
     const sameDevice = seed.activeDeviceId === this.state.activeDeviceId
     if (!sameDevice) this.unsub()
     const device = findDevice(seed.rooms, seed.activeDeviceId)
+    this.clearHistory()
     this.set({
       rooms: seed.rooms,
       activeRoomId: seed.activeRoomId,
@@ -430,12 +457,124 @@ export class ZoneStudioStore {
     return 'z' + Date.now().toString(36) + (this.idSeq++).toString(36)
   }
 
+  // ---- edit history (undo / redo) ----------------------------------------
+  //
+  // The history covers the authored editing session only. Every editing action
+  // pushes the pre-edit state; Apply, Revert, switching device, and any reload
+  // of the working copy from the device end the session and clear the history,
+  // so undo can never reach across the Apply boundary or reanimate another
+  // device's zones. Continuous inputs are collapsed to one step each: a canvas
+  // drag records once per gesture, a slider once per run of changes.
+  private past: HistoryEntry[] = []
+  private future: HistoryEntry[] = []
+  /** Coalescing key of the last recorded edit; a matching next edit merges. */
+  private editRunKey: string | null = null
+  /** Pre-gesture state, pushed at gesture end if the gesture changed anything. */
+  private gesturePre: HistoryEntry | null = null
+
+  private historyEntry(): HistoryEntry {
+    const s = this.state
+    return { zones: clone(s.zones), band: clone(s.band), mount: s.mount ? clone(s.mount) : null, view: s.view, sel: s.sel }
+  }
+
+  /** The authored (undoable) part of an entry, for change detection. */
+  private static authored(e: HistoryEntry): string {
+    return JSON.stringify({ zones: e.zones, band: e.band, mount: e.mount, view: e.view })
+  }
+
+  private pushPast(entry: HistoryEntry) {
+    this.past.push(entry)
+    if (this.past.length > HISTORY_LIMIT) this.past.shift()
+    this.future = []
+    this.set({ canUndo: true, canRedo: false })
+  }
+
+  /**
+   * Run a mutation as one undoable step. The pre-edit state is pushed only if
+   * the mutation actually changed the authored state, so a no-op action never
+   * creates an empty step. `runKey` coalesces consecutive changes from the same
+   * continuous control (a slider emits one change per tick) into a single step;
+   * the run breaks on any other action, a gesture, undo/redo, or endSliderEdit().
+   */
+  private recordEdit(fn: () => void, runKey?: string) {
+    const pre = this.historyEntry()
+    fn()
+    if (ZoneStudioStore.authored(pre) === ZoneStudioStore.authored(this.historyEntry())) return
+    if (!(runKey && runKey === this.editRunKey)) this.pushPast(pre)
+    this.editRunKey = runKey ?? null
+  }
+
+  /** Start a canvas drag gesture: the whole gesture becomes one undo step. */
+  private beginGesture() {
+    if (this.gesturePre) this.endGesture()
+    this.gesturePre = this.historyEntry()
+    this.editRunKey = null
+  }
+
+  /** End a canvas drag gesture; records it only if something actually changed. */
+  private endGesture() {
+    const pre = this.gesturePre
+    this.gesturePre = null
+    if (!pre) return
+    if (ZoneStudioStore.authored(pre) !== ZoneStudioStore.authored(this.historyEntry())) this.pushPast(pre)
+  }
+
+  /**
+   * End a slider run (pointer released or focus left), so the next adjustment
+   * of the same slider becomes its own undo step.
+   */
+  endSliderEdit() {
+    this.editRunKey = null
+  }
+
+  /** Forget the session's history. Called wherever the working copy is replaced from the device. */
+  private clearHistory() {
+    this.past = []
+    this.future = []
+    this.editRunKey = null
+    this.gesturePre = null
+    if (this.state.canUndo || this.state.canRedo) this.set({ canUndo: false, canRedo: false })
+  }
+
+  /** Step the editing session back one edit. Ignored during an active drag. */
+  undo() {
+    if (this.handle || this.past.length === 0) return
+    const entry = this.past.pop()!
+    this.future.push(this.historyEntry())
+    this.restore(entry)
+  }
+
+  /** Reapply the last undone edit. Ignored during an active drag. */
+  redo() {
+    if (this.handle || this.future.length === 0) return
+    const entry = this.future.pop()!
+    this.past.push(this.historyEntry())
+    this.restore(entry)
+  }
+
+  private restore(e: HistoryEntry) {
+    this.editRunKey = null
+    const sel = selectionValid(e.sel, this.state.sensors, e.zones) ? e.sel : defaultSelection(this.state.sensors, e.zones)
+    this.set({
+      zones: clone(e.zones),
+      band: clone(e.band),
+      mount: e.mount ? clone(e.mount) : null,
+      view: e.view,
+      sel,
+      draft: null,
+      hoverZoneId: null,
+      canUndo: this.past.length > 0,
+      canRedo: this.future.length > 0,
+    })
+  }
+
   // ---- simple actions ----------------------------------------------------
   toggleTheme() {
     this.setFn((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' }))
   }
+  /** The mount view toggle (wall/ceiling) is authored state, so it is undoable. */
   setView(view: View) {
-    this.set({ view })
+    this.recordEdit(() => this.set({ view }))
   }
   setTool(tool: Tool) {
     this.set({ tool, draft: null })
@@ -507,6 +646,8 @@ export class ZoneStudioStore {
     const room = this.state.rooms.find((r) => r.devices.some((d) => d.id === deviceId))
     const device = findDevice(this.state.rooms, deviceId)
     const sensors = deviceSensorKinds(device)
+    // Switching device ends the editing session; its history dies with it.
+    this.clearHistory()
     this.resub(deviceId)
     this.set({
       activeDeviceId: deviceId,
@@ -539,24 +680,36 @@ export class ZoneStudioStore {
     this.setFn((s) => ({ zones: s.zones.map((z) => (z.id === id ? fn(z) : z)) }))
   }
   renameZone(id: string, name: string) {
-    this.mutateZone(id, (z) => ({ ...z, name: name || 'Zone' }))
+    this.recordEdit(() => this.mutateZone(id, (z) => ({ ...z, name: name || 'Zone' })))
   }
   setZoneType(id: string, type: Zone['type']) {
-    this.mutateZone(id, (z) => ({ ...z, type }))
+    this.recordEdit(() => this.mutateZone(id, (z) => ({ ...z, type })))
   }
   patchRect(id: string, patch: Partial<Pick<RectZone, 'cx' | 'cy' | 'w' | 'h' | 'rot'>>) {
-    this.mutateZone(id, (z) => (z.shape === 'rect' ? { ...z, ...patch } : z))
+    // Only the rotation comes from a continuous control (the inspector slider),
+    // so only rotation runs coalesce; the numeric fields commit one step each.
+    const isRotRun = Object.keys(patch).join() === 'rot'
+    this.recordEdit(
+      () => this.mutateZone(id, (z) => (z.shape === 'rect' ? { ...z, ...patch } : z)),
+      isRotRun ? `rect:${id}:rot` : undefined,
+    )
   }
   deleteZone(id: string) {
-    this.setFn((s) => {
-      const zones = s.zones.filter((z) => z.id !== id)
-      return { zones, hoverZoneId: null, sel: zones.length ? { kind: 'zone', id: zones[0].id } : { kind: 'none' } }
-    })
+    this.recordEdit(() =>
+      this.setFn((s) => {
+        const zones = s.zones.filter((z) => z.id !== id)
+        return { zones, hoverZoneId: null, sel: zones.length ? { kind: 'zone', id: zones[0].id } : { kind: 'none' } }
+      }),
+    )
   }
 
   // ---- band edits --------------------------------------------------------
   patchBand(patch: Partial<BandConfig>) {
-    this.setFn((s) => ({ band: { ...s.band, ...patch } }))
+    // Band edits come from the inspector sliders; one run is one undo step.
+    this.recordEdit(
+      () => this.setFn((s) => ({ band: { ...s.band, ...patch } })),
+      'band:' + Object.keys(patch).sort().join(','),
+    )
   }
 
   // ---- apply / revert ----------------------------------------------------
@@ -578,6 +731,9 @@ export class ZoneStudioStore {
       })
       const cfg = await this.client.readConfig(activeDeviceId)
       if (this.state.activeDeviceId !== activeDeviceId) return
+      // The write is committed to hardware: the editing session is complete, so
+      // the history is cleared — undo never reaches back across an Apply.
+      this.clearHistory()
       this.set({
         zones: cfg.zones,
         band: cfg.band,
@@ -600,6 +756,9 @@ export class ZoneStudioStore {
     try {
       const cfg = await this.client.readConfig(deviceId)
       if (this.state.activeDeviceId !== deviceId) return
+      // Revert resets the session to the device state; the discarded session's
+      // history goes with it (undo is editing, Revert is the device).
+      this.clearHistory()
       this.set({
         zones: cfg.zones,
         band: cfg.band,
@@ -618,22 +777,27 @@ export class ZoneStudioStore {
   beginMoveZone(id: string, atM: Point) {
     const z = this.find(id)
     if (!z) return
+    this.beginGesture()
     this.handle = { mode: 'move', id, start: atM, orig: clone(z) }
     this.set({ sel: { kind: 'zone', id }, drag: { mode: 'move' } })
   }
   beginCornerResize(id: string, i: number) {
+    this.beginGesture()
     this.handle = { mode: 'corner', id, i }
     this.set({ sel: { kind: 'zone', id }, drag: { mode: 'corner' } })
   }
   beginRotate(id: string) {
+    this.beginGesture()
     this.handle = { mode: 'rotate', id }
     this.set({ drag: { mode: 'rotate' } })
   }
   beginVertex(id: string, i: number) {
+    this.beginGesture()
     this.handle = { mode: 'vertex', id, i }
     this.set({ sel: { kind: 'zone', id }, drag: { mode: 'vertex' } })
   }
   beginRadius(which: 'minR' | 'maxR') {
+    this.beginGesture()
     this.handle = { mode: which }
     this.set({ sel: { kind: 'sen' }, drag: { mode: which } })
   }
@@ -645,6 +809,7 @@ export class ZoneStudioStore {
       return
     }
     if (t === 'rect' || t === 'rot') {
+      this.beginGesture()
       this.handle = { mode: 'create', start: atM }
       this.set({ drag: { mode: 'create', start: atM }, cursor: atM })
       return
@@ -723,28 +888,31 @@ export class ZoneStudioStore {
     const h = this.handle
     this.handle = null
     if (this.state.drag) this.set({ drag: null })
-    if (!h || h.mode !== 'create') return
-    const a = h.start
-    const b = this.state.cursor ?? a
-    const w = Math.abs(b.x - a.x)
-    const hgt = Math.abs(b.y - a.y)
-    if (w > 0.3 && hgt > 0.3) {
-      const id = this.nextId()
-      const z: RectZone = {
-        id,
-        name: 'New zone',
-        type: 'detection',
-        shape: 'rect',
-        cx: snapHalf((a.x + b.x) / 2),
-        cy: snapHalf((a.y + b.y) / 2),
-        w: Math.round(w * 2) / 2,
-        h: Math.round(hgt * 2) / 2,
-        rot: 0,
+    if (h && h.mode === 'create') {
+      const a = h.start
+      const b = this.state.cursor ?? a
+      const w = Math.abs(b.x - a.x)
+      const hgt = Math.abs(b.y - a.y)
+      if (w > 0.3 && hgt > 0.3) {
+        const id = this.nextId()
+        const z: RectZone = {
+          id,
+          name: 'New zone',
+          type: 'detection',
+          shape: 'rect',
+          cx: snapHalf((a.x + b.x) / 2),
+          cy: snapHalf((a.y + b.y) / 2),
+          w: Math.round(w * 2) / 2,
+          h: Math.round(hgt * 2) / 2,
+          rot: 0,
+        }
+        this.setFn((s) => ({ zones: [...s.zones, z], sel: { kind: 'zone', id }, tool: 'select' }))
+      } else {
+        this.set({ tool: 'select' })
       }
-      this.setFn((s) => ({ zones: [...s.zones, z], sel: { kind: 'zone', id }, tool: 'select' }))
-    } else {
-      this.set({ tool: 'select' })
     }
+    // One gesture, one undo step — recorded only if the drag changed anything.
+    this.endGesture()
   }
 
   finishPolygon() {
@@ -752,6 +920,8 @@ export class ZoneStudioStore {
     if (!d || d.pts.length < 3) return
     const id = this.nextId()
     const z: PolyZone = { id, name: 'Polygon zone', type: 'detection', shape: 'poly', pts: d.pts }
-    this.setFn((s) => ({ zones: [...s.zones, z], draft: null, sel: { kind: 'zone', id }, tool: 'select' }))
+    this.recordEdit(() =>
+      this.setFn((s) => ({ zones: [...s.zones, z], draft: null, sel: { kind: 'zone', id }, tool: 'select' })),
+    )
   }
 }

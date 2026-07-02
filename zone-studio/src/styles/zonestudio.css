@@ -460,9 +460,15 @@
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.zs-seg__btn:hover:not(.is-on) {
+.zs-seg__btn:hover:not(.is-on):not(:disabled) {
   background: var(--ins);
   color: var(--tx);
+}
+
+/* Undo/redo rest here when the history is empty, in either direction. */
+.zs-seg__btn:disabled {
+  color: var(--faint);
+  cursor: default;
 }
 
 .zs-seg--fill .zs-seg__btn {

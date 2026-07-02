@@ -4,6 +4,23 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-07-02
+
+### Added
+
+- Undo and redo for the editing session. Every editing action — creating,
+  moving, resizing, rotating and deleting a zone, changing its type, name or
+  geometry, adjusting the band, and switching the mount view — steps back and
+  forward one action at a time, with Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or
+  Ctrl/Cmd+Y) and visible Undo/Redo buttons in the canvas toolbar, in both
+  themes. A canvas drag or a slider run counts as one step, and the history
+  keeps the last 50 steps.
+- Undo acts on the editing session only, never the device. Apply commits the
+  session (undo cannot reach back to un-write a sensor) and Revert still
+  resets to the device state; both start a fresh history, as does switching
+  device. Unsaved edits that survive an automatic reconnect keep their undo
+  history too.
+
 ## [0.4.4] - 2026-07-02
 
 ### Changed
