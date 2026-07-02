@@ -71,7 +71,7 @@ interface MadeProvider {
   pub: () => FakeMqttPublisher | null
 }
 
-function makeProvider(dataDir = tempDir(), factory?: MqttPublisherFactory): MadeProvider {
+function makeProvider(dataDir = tempDir(), factory?: MqttPublisherFactory, mqttRetryMs?: number): MadeProvider {
   const ref: { pub: FakeMqttPublisher | null } = { pub: null }
   const mqttFactory: MqttPublisherFactory =
     factory ??
@@ -87,6 +87,7 @@ function makeProvider(dataDir = tempDir(), factory?: MqttPublisherFactory): Made
     timeoutMs: 2000,
     mqttFactory,
     occupancyDebounceMs: { on: 0, off: 0 },
+    mqttRetryMs,
   })
   providers.push(provider)
   return { provider, pub: () => ref.pub }
@@ -216,6 +217,35 @@ describe('degradation when MQTT is unavailable', () => {
     })
     unsub()
     expect(Array.isArray(frame)).toBe(true)
+  })
+
+  it('recovers on its own when MQTT comes online later', async () => {
+    // The broker is down for the apply, then comes online: the background retry
+    // must publish the entities and flip the surfaced availability, with no
+    // re-apply and no restart.
+    let mqttUp = false
+    const ref: { pub: FakeMqttPublisher | null } = { pub: null }
+    const flaky: MqttPublisherFactory = async (topic) => {
+      if (!mqttUp) throw new Error('MQTT integration not installed')
+      ref.pub = new FakeMqttPublisher(topic)
+      return ref.pub
+    }
+    const { provider } = makeProvider(tempDir(), flaky, 25)
+    await provider.discover()
+    await provider.writeConfig('dev_ld', { zones: [lZone], band, mount })
+    expect((await provider.readConfig('dev_ld')).mqttAvailable).toBe(false)
+    expect(provider.status().mqtt).toBe(false)
+
+    mqttUp = true
+    const start = Date.now()
+    while (provider.status().mqtt !== true) {
+      if (Date.now() - start > 2000) throw new Error('MQTT recovery timed out')
+      await tick(10)
+    }
+
+    // The entities were published and the config read reports MQTT available.
+    expect(ref.pub!.last(configTopic('dev_ld', zoneObjectId('zL')))).toBeDefined()
+    expect((await provider.readConfig('dev_ld')).mqttAvailable).toBe(true)
   })
 })
 

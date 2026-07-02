@@ -46,6 +46,21 @@ export interface DeviceConfig {
 export type TargetListener = (targets: Target[]) => void
 export type Unsubscribe = () => void
 
+/**
+ * The provider's live health, polled by the frontend so the UI can leave and
+ * re-enter the connected state on its own (an HA restart, MQTT coming online)
+ * without the user pressing Retry. It carries no device data, only state.
+ */
+export interface ProviderStatus {
+  /** The upstream connection. The mock provider is always connected. */
+  ha: 'connected' | 'connecting' | 'offline'
+  /**
+   * Whether the MQTT publish path is available. Mirrors the tri-state surfaced on
+   * a polygon device's config read: null until a polygon device first needs MQTT.
+   */
+  mqtt: boolean | null
+}
+
 export interface DataProvider {
   /** Discover rooms, devices and sensors. */
   discover(): Promise<Room[]>
@@ -62,6 +77,9 @@ export interface DataProvider {
    * function unsubscribes.
    */
   subscribeTargets(deviceId: string, onSample: TargetListener): Unsubscribe
+
+  /** The provider's live health (see ProviderStatus). Synchronous and cheap. */
+  status(): ProviderStatus
 
   /** Release timers and connections. Called on server shutdown. */
   dispose?(): void

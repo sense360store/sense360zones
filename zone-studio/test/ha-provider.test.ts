@@ -247,6 +247,18 @@ describe('HaDataProvider against the simulator', () => {
     expect(ld.mount).toEqual(mount)
   })
 
+  it('surfaces the live Home Assistant connection through status()', async () => {
+    const provider = makeProvider()
+    await provider.discover()
+    expect(provider.status()).toEqual({ ha: 'connected', mqtt: null })
+
+    // A dropped socket is visible immediately, and clears again on its own once
+    // the client's automatic reconnect succeeds.
+    sim.dropConnections()
+    await waitFor(() => provider.status().ha !== 'connected')
+    await waitFor(() => provider.status().ha === 'connected')
+  })
+
   it('reconnects, re-authenticates and resumes streaming after the socket drops', async () => {
     const provider = makeProvider()
     await provider.discover()

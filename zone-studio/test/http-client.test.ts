@@ -41,6 +41,11 @@ describe('HttpZonesClient against a live backend', () => {
     expect(rooms[0].devices[0].id).toBe('dev-living-1')
   })
 
+  it('reads the provider status over HTTP', async () => {
+    const status = await client.status()
+    expect(status).toEqual({ ha: 'connected', mqtt: null })
+  })
+
   it('reads and writes config over HTTP', async () => {
     const cfg = await client.readConfig('dev-living-1')
     expect(cfg.zones).toHaveLength(4)

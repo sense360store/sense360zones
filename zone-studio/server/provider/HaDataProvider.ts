@@ -62,7 +62,7 @@ import {
   type ZoneNumberRoles,
 } from '../ha/types'
 import { Persistence } from '../persistence'
-import type { DataProvider, DeviceConfig, TargetListener, Unsubscribe } from './DataProvider'
+import type { DataProvider, DeviceConfig, ProviderStatus, TargetListener, Unsubscribe } from './DataProvider'
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
@@ -98,6 +98,8 @@ export interface HaDataProviderOptions {
   mqttFactory?: MqttPublisherFactory
   /** Debounce for occupancy transitions (milliseconds). Tests use 0 for immediacy. */
   occupancyDebounceMs?: { on: number; off: number }
+  /** How often to retry the MQTT publisher after a failure. Tests use a few ms. */
+  mqttRetryMs?: number
   /**
    * Pattern recognising a Sense360 identity in a device's manufacturer or model.
    * Defaults to /sense360/i. Discovery prefers matching ESPHome devices and marks
@@ -124,16 +126,20 @@ export class HaDataProvider implements DataProvider {
   // ---- live polygon occupancy (Phase 4) ----------------------------------
   private readonly mqttFactory: MqttPublisherFactory
   private readonly occupancyDebounceMs?: { on: number; off: number }
+  private readonly mqttRetryMs: number
   private publisher: MqttPublisher | null = null
   private publisherPending: Promise<MqttPublisher | null> | null = null
   private occupancy: OccupancyRuntime | null = null
   /** Tri-state: undefined until a polygon device first needs MQTT, then the outcome. */
   private mqttAvailable: boolean | undefined
+  private mqttRetryTimer: ReturnType<typeof setTimeout> | null = null
+  private disposed = false
 
   constructor(opts: HaDataProviderOptions) {
     this.logger = opts.logger ?? noopLogger
     this.mqttFactory = opts.mqttFactory ?? supervisorMqttFactory
     this.occupancyDebounceMs = opts.occupancyDebounceMs
+    this.mqttRetryMs = opts.mqttRetryMs ?? 15000
     this.sense360Pattern = opts.sense360Pattern ?? DEFAULT_SENSE360_PATTERN
     this.client = new HaWsClient({
       url: opts.wsUrl,
@@ -158,6 +164,14 @@ export class HaDataProvider implements DataProvider {
   /** The live Home Assistant connection state. */
   connectionState(): ConnectionState {
     return this.client.getState()
+  }
+
+  /**
+   * The provider's live health, served by /api/status. The frontend polls it so
+   * the UI notices an HA drop or MQTT coming online without a manual retry.
+   */
+  status(): ProviderStatus {
+    return { ha: this.client.getState(), mqtt: this.mqttAvailable ?? null }
   }
 
   async discover(): Promise<Room[]> {
@@ -357,6 +371,9 @@ export class HaDataProvider implements DataProvider {
   }
 
   dispose(): void {
+    this.disposed = true
+    if (this.mqttRetryTimer !== null) clearTimeout(this.mqttRetryTimer)
+    this.mqttRetryTimer = null
     this.occupancy?.dispose()
     // Closing the publisher publishes the offline availability before the socket
     // drops, so the entities show unavailable rather than disappearing.
@@ -505,7 +522,12 @@ export class HaDataProvider implements DataProvider {
     runtime.activate({ id: deviceId, name }, zones, (cb) => this.subscribeTargets(deviceId, cb))
   }
 
-  /** Lazily build the MQTT publisher and the runtime, once, on first polygon need. */
+  /**
+   * Lazily build the MQTT publisher and the runtime on first polygon need. A
+   * failure is not final: the pending handle is cleared so the next need tries
+   * again, and a background retry keeps trying while any polygon device is
+   * active, so MQTT being installed or coming online recovers on its own.
+   */
   private async ensureRuntime(): Promise<OccupancyRuntime | null> {
     if (this.occupancy) return this.occupancy
     if (!this.publisherPending) {
@@ -519,7 +541,9 @@ export class HaDataProvider implements DataProvider {
     }
     const publisher = await this.publisherPending
     if (!publisher) {
+      this.publisherPending = null
       this.mqttAvailable = false
+      this.scheduleMqttRetry()
       return null
     }
     this.publisher = publisher
@@ -531,6 +555,30 @@ export class HaDataProvider implements DataProvider {
       offDelayMs: this.occupancyDebounceMs?.off,
     })
     return this.occupancy
+  }
+
+  /** Retry the MQTT publisher in the background while a polygon device needs it. */
+  private scheduleMqttRetry(): void {
+    if (this.disposed || this.mqttRetryTimer !== null) return
+    this.mqttRetryTimer = setTimeout(() => {
+      this.mqttRetryTimer = null
+      void this.retryMqtt()
+    }, this.mqttRetryMs)
+    if (typeof this.mqttRetryTimer.unref === 'function') this.mqttRetryTimer.unref()
+  }
+
+  /**
+   * One background MQTT retry: when a polygon device is still waiting on MQTT,
+   * re-activate it (which retries the publisher). On success the entities are
+   * published and `mqttAvailable` flips true, which the status poll surfaces to
+   * the editor; on failure `ensureRuntime` schedules the next retry.
+   */
+  private async retryMqtt(): Promise<void> {
+    if (this.disposed || this.occupancy) return
+    const waiting = [...this.deviceNames.keys()].some((id) => this.persistence.getProfile(id) === 'polygon')
+    if (!waiting) return // nothing to publish; the next polygon apply retries anyway
+    this.logger.info({}, 'retrying the MQTT publisher for polygon zone entities')
+    await this.reactivatePolygonDevices()
   }
 
   /**

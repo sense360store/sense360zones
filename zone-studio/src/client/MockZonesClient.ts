@@ -15,7 +15,7 @@
  */
 import { LD2450_FOV_HALF, LD2450_RANGE } from '../domain/constants'
 import type { BandConfig, Device, Room, Sensor, Target, Zone } from '../domain/types'
-import type { DeviceConfig, TargetListener, Unsubscribe, ZonesClient } from './ZonesClient'
+import type { DeviceConfig, ProviderStatus, TargetListener, Unsubscribe, ZonesClient } from './ZonesClient'
 
 /** Synchronous bootstrap snapshot, used to seed the store without a load flash. */
 export interface Seed {
@@ -111,6 +111,11 @@ export class MockZonesClient implements ZonesClient {
 
   async discover(): Promise<Room[]> {
     return clone(this.rooms)
+  }
+
+  /** The simulation has no upstream, so it is always connected and MQTT-less. */
+  async status(): Promise<ProviderStatus> {
+    return { ha: 'connected', mqtt: null }
   }
 
   async readConfig(deviceId: string): Promise<DeviceConfig> {

@@ -4,6 +4,32 @@ All notable changes to this add-on are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-07-02
+
+### Changed
+
+- Connection and error states are now self-recovering. The offline and
+  no-sensors screens re-check in the background and return to the editor on
+  their own when Home Assistant comes back or a radar device appears, and the
+  live view watches the connection with a status heartbeat so a dropped Home
+  Assistant is noticed within seconds instead of showing a stale "live" state.
+  The Retry button stays available but is rarely needed.
+- Reconnecting no longer costs work: unsaved zone and band edits survive an
+  automatic reconnect (they are rebased onto the fresh device baseline and stay
+  marked unsaved), and the current selection is kept when it still exists.
+  Background retries no longer flicker the screen through the connecting state.
+- If the MQTT integration is unavailable when polygon zones are applied, the
+  add-on now keeps retrying in the background and publishes the occupancy
+  entities as soon as MQTT comes online; the editor's "MQTT required" notice
+  clears by itself. Previously a failed MQTT connection was final until the
+  add-on restarted.
+- The offline and no-sensors overlays explain what is happening, what (if
+  anything) to do, and state that the screen recovers automatically, with a
+  quiet pulsing indicator while watching, in both themes.
+- A new lightweight `/api/status` endpoint surfaces the backend's Home
+  Assistant connection and MQTT availability to the editor. No device data or
+  existing endpoint changed.
+
 ## [0.4.3] - 2026-07-01
 
 ### Changed

@@ -41,8 +41,26 @@ export type Tool = 'select' | 'rect' | 'rot' | 'poly'
  *   - connected     Home Assistant answered and at least one device was found,
  *   - no-devices    Home Assistant answered but no radar sensors were detected,
  *   - offline       Home Assistant (or the backend) could not be reached.
+ *
+ * Every non-connected state is self-recovering once `startAutoRecovery` runs:
+ * offline and no-devices re-discover in the background, and connected is watched
+ * with a status heartbeat so a dropped Home Assistant is noticed without a click.
  */
 export type ConnectionState = 'connecting' | 'connected' | 'no-devices' | 'offline'
+
+/** Cadence for the self-recovery loop (overridable per call, mainly for tests). */
+export interface RecoveryOptions {
+  /** Delay between background re-discoveries while offline or no-devices. */
+  retryMs?: number
+  /** Delay between status polls while connected. */
+  heartbeatMs?: number
+  /** Consecutive failed polls before the live view yields to the offline state. */
+  gracePolls?: number
+}
+
+const RECOVERY_RETRY_MS = 5000
+const RECOVERY_HEARTBEAT_MS = 5000
+const RECOVERY_GRACE_POLLS = 2
 
 export type Selection =
   | { kind: 'zone'; id: string }
@@ -147,6 +165,22 @@ function defaultSelection(sensors: SensorKind[], zones: Zone[]): Selection {
   return { kind: 'device' }
 }
 
+/** Whether a selection still points at something the refreshed device carries. */
+function selectionValid(sel: Selection, sensors: SensorKind[], zones: Zone[]): boolean {
+  switch (sel.kind) {
+    case 'zone':
+      return zones.some((z) => z.id === sel.id)
+    case 'ld':
+      return sensors.includes('ld2450')
+    case 'sen':
+      return sensors.includes('sen0609')
+    case 'device':
+      return true
+    case 'none':
+      return false
+  }
+}
+
 export class ZoneStudioStore {
   private state: EditorState
   private listeners = new Set<Listener>()
@@ -192,12 +226,16 @@ export class ZoneStudioStore {
   /**
    * Discover the model from the data source and load the active device, setting
    * the connection state honestly. This is the production entry point (called by
-   * instance.ts on start and by the offline-state retry). It never falls back to
-   * simulated data: a failure becomes the offline state, an empty result becomes
-   * the no-devices state.
+   * instance.ts on start, by the offline-state retry, and by the auto-recovery
+   * loop). It never falls back to simulated data: a failure becomes the offline
+   * state, an empty result becomes the no-devices state.
+   *
+   * `background` marks an automatic retry: the current state stays on screen
+   * until the outcome (no connecting flicker every few seconds), and a selection
+   * that still exists is kept rather than reset.
    */
-  async refresh(): Promise<void> {
-    this.set({ connection: 'connecting' })
+  async refresh(opts: { background?: boolean } = {}): Promise<void> {
+    if (!opts.background) this.set({ connection: 'connecting' })
     try {
       const rooms = await this.client.discover()
       const devices = rooms.flatMap((r) => r.devices)
@@ -211,6 +249,13 @@ export class ZoneStudioStore {
       const device = room.devices.find((d) => d.id === this.state.activeDeviceId) ?? room.devices[0]
       const sensors = deviceSensorKinds(device)
       const cfg = await this.client.readConfig(device.id)
+      // Reconnecting must not cost the user their work: on the same device a
+      // dirty working copy is kept, rebased onto the fresh device baseline.
+      const sameDevice = device.id === this.state.activeDeviceId
+      const keepEdit = sameDevice && isDirty(this.state)
+      const zones = keepEdit ? this.state.zones : cfg.zones
+      const band = keepEdit ? this.state.band : cfg.band
+      const keepSel = Boolean(opts.background) && sameDevice && selectionValid(this.state.sel, sensors, zones)
       this.resub(device.id)
       this.set({
         rooms,
@@ -218,11 +263,11 @@ export class ZoneStudioStore {
         activeDeviceId: device.id,
         sensors,
         candidate: device.candidate ?? null,
-        zones: cfg.zones,
-        band: cfg.band,
+        zones,
+        band,
         mount: cfg.mount ?? null,
         saved: snapshot(cfg.zones, cfg.band),
-        sel: defaultSelection(sensors, cfg.zones),
+        sel: keepSel ? this.state.sel : defaultSelection(sensors, zones),
         connection: 'connected',
         applyError: null,
         mqttAvailable: cfg.mqttAvailable ?? null,
@@ -232,7 +277,90 @@ export class ZoneStudioStore {
       // paper over it with simulated targets.
       this.resub('')
       this.set({ connection: 'offline', targets: [] })
+    } finally {
+      // Re-pace the recovery loop for the state we landed in (no-op when the
+      // loop is not running). A manual retry resets the cadence the same way.
+      this.scheduleRecoveryTick()
     }
+  }
+
+  // ---- self-recovery -------------------------------------------------------
+  private recovery: Required<RecoveryOptions> | null = null
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null
+  private recoveryBusy = false
+  private badPolls = 0
+
+  /**
+   * Start the self-recovery loop (production entry: instance.ts). While offline
+   * or no-devices it re-discovers in the background until the condition clears;
+   * while connected it polls the backend status so a dropped Home Assistant is
+   * noticed (after a short grace, so a reconnect blip does not flicker the UI)
+   * and an MQTT flip is surfaced. Manual Retry stays available but is no longer
+   * needed for any of these transitions.
+   */
+  startAutoRecovery(opts: RecoveryOptions = {}): void {
+    this.recovery = {
+      retryMs: opts.retryMs ?? RECOVERY_RETRY_MS,
+      heartbeatMs: opts.heartbeatMs ?? RECOVERY_HEARTBEAT_MS,
+      gracePolls: opts.gracePolls ?? RECOVERY_GRACE_POLLS,
+    }
+    this.scheduleRecoveryTick()
+  }
+
+  private scheduleRecoveryTick(): void {
+    if (!this.recovery) return
+    if (this.recoveryTimer !== null) clearTimeout(this.recoveryTimer)
+    const delay = this.state.connection === 'connected' ? this.recovery.heartbeatMs : this.recovery.retryMs
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null
+      void this.recoveryTick()
+    }, delay)
+  }
+
+  private async recoveryTick(): Promise<void> {
+    if (!this.recovery || this.recoveryBusy) return
+    this.recoveryBusy = true
+    try {
+      if (this.state.connection === 'connected') {
+        await this.heartbeat()
+      } else if (this.state.connection !== 'connecting') {
+        // offline / no-devices: try again quietly. refresh() reschedules.
+        await this.refresh({ background: true })
+        return
+      }
+    } finally {
+      this.recoveryBusy = false
+    }
+    this.scheduleRecoveryTick()
+  }
+
+  /** One status poll while connected. */
+  private async heartbeat(): Promise<void> {
+    try {
+      const status = await this.client.status()
+      if (status.ha === 'connected') {
+        this.badPolls = 0
+        // Surface an MQTT flip for the active polygon device without touching
+        // the working copy (null means MQTT is not relevant to this device).
+        if (this.state.mqttAvailable !== null && status.mqtt !== null && status.mqtt !== this.state.mqttAvailable) {
+          this.set({ mqttAvailable: status.mqtt })
+        }
+        return
+      }
+      this.onHeartbeatFailure()
+    } catch {
+      this.onHeartbeatFailure()
+    }
+  }
+
+  private onHeartbeatFailure(): void {
+    this.badPolls += 1
+    if (this.badPolls < (this.recovery?.gracePolls ?? RECOVERY_GRACE_POLLS)) return
+    this.badPolls = 0
+    // The live view is no longer true: clear the stream and show the offline
+    // state. The recovery loop then re-discovers until the connection returns.
+    this.resub('')
+    this.set({ connection: 'offline', targets: [] })
   }
 
   /** Re-point the live target stream at a device (empty id tears it down). */
@@ -278,6 +406,9 @@ export class ZoneStudioStore {
     }
   }
   dispose() {
+    this.recovery = null
+    if (this.recoveryTimer !== null) clearTimeout(this.recoveryTimer)
+    this.recoveryTimer = null
     this.unsub()
   }
 

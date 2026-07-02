@@ -34,6 +34,9 @@ class FakeClient implements ZonesClient {
   async readConfig(): Promise<DeviceConfig> {
     return { zones: [], band: DEFAULT_BAND }
   }
+  async status() {
+    return { ha: 'connected' as const, mqtt: null }
+  }
   async writeConfig(deviceId: string, config: DeviceConfig): Promise<void> {
     this.writes.push({ deviceId, config })
   }

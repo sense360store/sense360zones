@@ -14,7 +14,7 @@
  * the Vite dev proxy forwards `/api` and `/ws` to the backend.
  */
 import type { Room, Target } from '../domain/types'
-import type { DeviceConfig, TargetListener, Unsubscribe, ZonesClient } from './ZonesClient'
+import type { DeviceConfig, ProviderStatus, TargetListener, Unsubscribe, ZonesClient } from './ZonesClient'
 
 /** Minimal view of `window.location` the URL helpers need (injectable for tests). */
 export interface LocationLike {
@@ -62,6 +62,12 @@ export class HttpZonesClient implements ZonesClient {
     const res = await fetch(apiUrl('discover', this.loc))
     if (!res.ok) throw new Error(`discover failed: ${res.status}`)
     return (await res.json()) as Room[]
+  }
+
+  async status(): Promise<ProviderStatus> {
+    const res = await fetch(apiUrl('status', this.loc))
+    if (!res.ok) throw new Error(`status failed: ${res.status}`)
+    return (await res.json()) as ProviderStatus
   }
 
   async readConfig(deviceId: string): Promise<DeviceConfig> {

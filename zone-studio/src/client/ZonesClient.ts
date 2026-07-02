@@ -41,9 +41,24 @@ export interface DeviceConfig {
 export type TargetListener = (targets: Target[]) => void
 export type Unsubscribe = () => void
 
+/**
+ * The backend's live health, mirroring the server's `ProviderStatus`. The store
+ * polls it while connected so the UI notices Home Assistant dropping (and MQTT
+ * coming online) and recovers on its own, without a manual retry.
+ */
+export interface ProviderStatus {
+  /** The upstream Home Assistant connection (the mock is always connected). */
+  ha: 'connected' | 'connecting' | 'offline'
+  /** MQTT publish path availability; null until a polygon device first needs it. */
+  mqtt: boolean | null
+}
+
 export interface ZonesClient {
   /** Discover rooms, devices and sensors. (Phase 2: real HA discovery.) */
   discover(): Promise<Room[]>
+
+  /** The backend's live health. Rejects when the backend itself is unreachable. */
+  status(): Promise<ProviderStatus>
 
   /** Read the live device config (zones + band) for a device. (Phase 2/3.) */
   readConfig(deviceId: string): Promise<DeviceConfig>
