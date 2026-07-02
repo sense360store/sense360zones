@@ -91,8 +91,12 @@ export function TopBar() {
             {view.error}
           </span>
         )}
-        {!view.error && dirty && <span className="zs-topbar__dirty">Unsaved</span>}
-        <button className="zs-btn" onClick={() => void store.revert()}>
+        {!view.error && dirty && (
+          <span className="zs-topbar__dirty" title="The editor has edits the sensor does not have yet">
+            Unsaved changes
+          </span>
+        )}
+        <button className="zs-btn" onClick={() => void store.revert()} title="Discard edits and reload the sensor's current config">
           Revert
         </button>
         <button

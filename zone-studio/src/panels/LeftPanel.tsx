@@ -101,12 +101,15 @@ export function LeftPanel() {
             const cnt = occ[z.id] || 0
             const cnumActive = isExcl ? false : cnt > 0
             const selected = s.sel.kind === 'zone' && s.sel.id === z.id
+            const hovered = s.hoverZoneId === z.id && !selected
             const shapeLabel = z.shape === 'poly' ? 'polygon' : z.rot ? 'rotated' : 'rect'
             return (
               <div
                 key={z.id}
-                className={'zs-row is-clickable' + (selected ? ' is-selected--green' : '')}
+                className={'zs-row is-clickable' + (selected ? ' is-selected--green' : hovered ? ' is-hover' : '')}
                 onClick={() => store.selectZone(z.id)}
+                onMouseEnter={() => store.hoverZone(z.id)}
+                onMouseLeave={() => store.hoverZone(null)}
               >
                 <span
                   className="zs-swatch zs-swatch--outline"
@@ -118,15 +121,23 @@ export function LeftPanel() {
                     {m.label} · {shapeLabel}
                   </div>
                 </div>
-                <span className={'zs-badge' + (isExcl ? ' is-excl' : cnumActive ? ' is-on' : '')}>
-                  {isExcl ? 'excl' : cnt + '/3'}
+                <span
+                  className={'zs-badge' + (isExcl ? ' is-excl' : cnumActive ? ' is-on' : '')}
+                  title={isExcl ? 'Exclusion zone: targets inside are ignored' : cnt + ' of 3 tracked targets inside'}
+                >
+                  {isExcl ? 'mask' : cnt + '/3'}
                 </span>
               </div>
             )
           })}
-        {hasLd && (
+        {hasLd && s.zones.length === 0 && (
           <div className="zs-note zs-zonelist__note">
-            Draw tools live on the canvas toolbar. SEN0609 has no drawable zones, only its radial band.
+            No zones yet. Choose <b>Rect</b> in the canvas toolbar, then drag on the canvas to draw your first zone.
+          </div>
+        )}
+        {hasLd && s.zones.length > 0 && (
+          <div className="zs-note zs-zonelist__note">
+            Draw new zones with the canvas toolbar.{hasSen ? ' SEN0609 has no drawable zones, only its radial band.' : ''}
           </div>
         )}
       </div>

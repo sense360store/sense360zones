@@ -13,7 +13,7 @@ export function LdPanel(props: { targets: Target[]; presence: boolean }) {
         <div className="zs-insp-head__body">
           <span className="zs-eyebrow">HLK LD2450</span>
           <div className="zs-insp-title">Spatial tracking</div>
-          <div className="zs-insp-head__meta">120° FoV · X/Y · up to 3 targets</div>
+          <div className="zs-insp-head__meta">120° field of view · X/Y · up to 3 targets</div>
         </div>
         {/* Derived device presence: detection minus exclusion, from the shared evaluator. */}
         <span

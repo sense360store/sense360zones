@@ -93,7 +93,7 @@ export function BandPanel(props: { band: BandConfig }) {
           onChange={(e) => store.patchBand({ beam: fv(e) })}
         />
         <div className="zs-note" style={{ marginTop: 11 }}>
-          Drag the dots on the boresight to shape the inner and outer arc directly.
+          You can also drag the two dots on the canvas centre line to shape the inner and outer arcs directly.
         </div>
       </div>
 

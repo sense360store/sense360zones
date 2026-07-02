@@ -22,7 +22,9 @@ export function Inspector() {
         <div className="zs-empty">
           Nothing selected.
           <br />
-          Pick a zone, a layer, or a sensor to edit its properties.
+          {s.zones.length > 0
+            ? 'Click a zone on the canvas or in the list to edit it here.'
+            : 'Choose Rect in the canvas toolbar and drag on the canvas to draw a zone; it opens here for editing.'}
         </div>
       )}
     </>

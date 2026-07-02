@@ -77,6 +77,14 @@ export interface EditorState {
   targets: Target[]
   draft: { pts: Point[] } | null
   cursor: Point | null
+  /** Zone under the pointer (canvas or list row), for the shared hover highlight. */
+  hoverZoneId: string | null
+  /**
+   * The in-flight canvas drag, mirrored from the imperative handle so the canvas
+   * can show live feedback (a size/position readout, the rubber-band rectangle)
+   * while the user drags. Presentation only; cleared on release.
+   */
+  drag: { mode: 'move' | 'corner' | 'rotate' | 'vertex' | 'minR' | 'maxR' | 'create'; start?: Point } | null
   // dirty tracking: JSON snapshot of the last config read from the device
   saved: string
   /** Apply lifecycle: 'applying' while a write+read-back is in flight. */
@@ -171,6 +179,8 @@ export class ZoneStudioStore {
       targets: [],
       draft: null,
       cursor: null,
+      hoverZoneId: null,
+      drag: null,
       saved: snapshot(seed.zones, seed.band),
       applyState: 'idle',
       applyError: null,
@@ -315,6 +325,10 @@ export class ZoneStudioStore {
   toggleLayer(k: 'ld' | 'sen') {
     this.setFn((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } }))
   }
+  /** Hover highlight, shared between the canvas and the zone list. */
+  hoverZone(id: string | null) {
+    if (this.state.hoverZoneId !== id) this.set({ hoverZoneId: id })
+  }
 
   // ---- device mapping / confirmation ------------------------------------
   /**
@@ -405,7 +419,7 @@ export class ZoneStudioStore {
   deleteZone(id: string) {
     this.setFn((s) => {
       const zones = s.zones.filter((z) => z.id !== id)
-      return { zones, sel: zones.length ? { kind: 'zone', id: zones[0].id } : { kind: 'none' } }
+      return { zones, hoverZoneId: null, sel: zones.length ? { kind: 'zone', id: zones[0].id } : { kind: 'none' } }
     })
   }
 
@@ -474,22 +488,23 @@ export class ZoneStudioStore {
     const z = this.find(id)
     if (!z) return
     this.handle = { mode: 'move', id, start: atM, orig: clone(z) }
-    this.set({ sel: { kind: 'zone', id } })
+    this.set({ sel: { kind: 'zone', id }, drag: { mode: 'move' } })
   }
   beginCornerResize(id: string, i: number) {
     this.handle = { mode: 'corner', id, i }
-    this.set({ sel: { kind: 'zone', id } })
+    this.set({ sel: { kind: 'zone', id }, drag: { mode: 'corner' } })
   }
   beginRotate(id: string) {
     this.handle = { mode: 'rotate', id }
+    this.set({ drag: { mode: 'rotate' } })
   }
   beginVertex(id: string, i: number) {
     this.handle = { mode: 'vertex', id, i }
-    this.set({ sel: { kind: 'zone', id } })
+    this.set({ sel: { kind: 'zone', id }, drag: { mode: 'vertex' } })
   }
   beginRadius(which: 'minR' | 'maxR') {
     this.handle = { mode: which }
-    this.set({ sel: { kind: 'sen' } })
+    this.set({ sel: { kind: 'sen' }, drag: { mode: which } })
   }
   beginCanvas(atM: Point) {
     const t = this.state.tool
@@ -500,6 +515,7 @@ export class ZoneStudioStore {
     }
     if (t === 'rect' || t === 'rot') {
       this.handle = { mode: 'create', start: atM }
+      this.set({ drag: { mode: 'create', start: atM }, cursor: atM })
       return
     }
     this.set({ sel: { kind: 'none' } })
@@ -575,6 +591,7 @@ export class ZoneStudioStore {
   dragEnd() {
     const h = this.handle
     this.handle = null
+    if (this.state.drag) this.set({ drag: null })
     if (!h || h.mode !== 'create') return
     const a = h.start
     const b = this.state.cursor ?? a

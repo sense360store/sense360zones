@@ -55,6 +55,36 @@ export function Canvas() {
   )
 }
 
+/** The live readout shown beside the pointer while a drag is in flight. */
+function dragReadout(s: EditorState): string | null {
+  const d = s.drag
+  if (!d) return null
+  const sel = s.sel
+  const zone = sel.kind === 'zone' ? s.zones.find((z) => z.id === sel.id) : undefined
+  const cur = s.cursor
+  switch (d.mode) {
+    case 'move':
+      if (zone?.shape === 'rect') return `x ${zone.cx.toFixed(1)}  y ${zone.cy.toFixed(1)} m`
+      return cur ? `x ${cur.x.toFixed(1)}  y ${cur.y.toFixed(1)} m` : null
+    case 'corner':
+      return zone?.shape === 'rect' ? `${zone.w.toFixed(1)} × ${zone.h.toFixed(1)} m` : null
+    case 'rotate':
+      return zone?.shape === 'rect' ? `${Math.round(zone.rot)}°` : null
+    case 'vertex':
+      return cur ? `x ${cur.x.toFixed(1)}  y ${cur.y.toFixed(1)} m` : null
+    case 'minR':
+      return `inner ${s.band.minR.toFixed(1)} m`
+    case 'maxR':
+      return `outer ${s.band.maxR.toFixed(1)} m`
+    case 'create': {
+      if (!d.start || !cur) return null
+      const w = Math.round(Math.abs(cur.x - d.start.x) * 2) / 2
+      const h = Math.round(Math.abs(cur.y - d.start.y) * 2) / 2
+      return `${w.toFixed(1)} × ${h.toFixed(1)} m`
+    }
+  }
+}
+
 function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; hasLd: boolean; hasSen: boolean }) {
   const { s, w, h, ts, hasLd, hasSen } = props
   const showLd = s.layers.ld && hasLd
@@ -80,7 +110,7 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
   const halo = fs(3)
 
   // Range rings, labelled on the left of the centre line so the labels never
-  // strike through the boresight (r is integer → dash is always '3 6'). On a
+  // strike through the boresight (r is integer → dash is always '4 5'). On a
   // small canvas (ts high) only every second ring is labelled to avoid clutter.
   const ringLabelStep = ts > 1.5 ? 2 : 1
   const rings = Array.from({ length: RING_COUNT }, (_, k) => {
@@ -95,10 +125,10 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
     return { x: sx + Math.sin(a) * SPOKE_RADIUS_M * M, y: sy + Math.cos(a) * SPOKE_RADIUS_M * M }
   })
 
-  // LD2450 field of view
-  const ldCone = `${sx},${sy} ${sx + Math.sin(-ha) * LD2450_RANGE * M},${sy + Math.cos(-ha) * LD2450_RANGE * M} ${
-    sx + Math.sin(ha) * LD2450_RANGE * M
-  },${sy + Math.cos(ha) * LD2450_RANGE * M}`
+  // LD2450 field of view; the edge rays give the wedge a readable outline.
+  const ldEdgeL = { x: sx + Math.sin(-ha) * LD2450_RANGE * M, y: sy + Math.cos(-ha) * LD2450_RANGE * M }
+  const ldEdgeR = { x: sx + Math.sin(ha) * LD2450_RANGE * M, y: sy + Math.cos(ha) * LD2450_RANGE * M }
+  const ldCone = `${sx},${sy} ${ldEdgeL.x},${ldEdgeL.y} ${ldEdgeR.x},${ldEdgeR.y}`
   const ldDiscR = LD2450_RANGE * M
 
   // SEN0609 radial band (sector minR..maxR over beam)
@@ -133,9 +163,35 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
   const draftDots = s.draft ? s.draft.pts.map((pt) => toPx(pt.x, pt.y)) : []
   const draftLine = draftDots.map((d) => `${d.x},${d.y}`).join(' ')
 
+  // Handle geometry is sized in on-screen terms (via ts) so the grab targets
+  // stay comfortable on a small canvas instead of shrinking with the viewbox.
+  const handleSize = fs(11)
+  const handleHit = fs(24)
+  const bandHandleR = fs(7.5)
+  const bandHandleHitR = fs(14)
+
+  // rubber-band preview while dragging out a new rectangle
+  const creating = s.drag?.mode === 'create' && s.drag.start && s.cursor ? { a: toPx(s.drag.start.x, s.drag.start.y), b: toPx(s.cursor.x, s.cursor.y) } : null
+
+  // live readout beside the pointer during any drag
+  const readout = dragReadout(s)
+  const readoutAt = s.cursor ? toPx(s.cursor.x, s.cursor.y) : null
+
   const canvasCursor = s.tool === 'select' ? 'default' : 'crosshair'
   const cur = s.cursor
   const cursorReadout = cur ? `x ${cur.x.toFixed(2)}  y ${cur.y.toFixed(2)} m` : 'x —  y —'
+
+  // First-run guidance: an LD2450 with no zones yet gets pointed at the draw
+  // tools instead of an empty grid. The hint follows the active tool and gets
+  // out of the way as soon as drawing starts.
+  const firstRunHint =
+    showLd && s.zones.length === 0 && !s.draft && !s.drag
+      ? s.tool === 'select'
+        ? 'No zones yet. Choose Rect in the toolbar, then drag on the canvas to draw your first zone.'
+        : s.tool === 'poly'
+          ? 'Click to drop points, then double-click to close the shape.'
+          : 'Drag on the canvas to draw the zone.'
+      : null
 
   return (
     <>
@@ -162,9 +218,9 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
         </defs>
 
         {/* range rings */}
-        <g opacity="0.9">
+        <g>
           {rings.map((r, i) => (
-            <circle key={i} cx={sx} cy={sy} r={r.rPx} fill="none" stroke="var(--ring)" strokeWidth="1" strokeDasharray="3 6"></circle>
+            <circle key={i} cx={sx} cy={sy} r={r.rPx} fill="none" stroke="var(--ring)" strokeWidth="1.2" strokeDasharray="4 5"></circle>
           ))}
           {rings
             .filter((r) => r.labelled)
@@ -175,8 +231,9 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
                 x={r.lx}
                 y={r.ly}
                 textAnchor="end"
-                fill="var(--faint)"
-                fontSize={fs(9.5)}
+                fill="var(--mut)"
+                fontSize={fs(10)}
+                fontWeight="600"
                 strokeWidth={halo}
               >
                 {r.label}
@@ -185,17 +242,28 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
         </g>
 
         {/* radial spokes */}
-        <g opacity="0.5">
+        <g opacity="0.7">
           {spokes.map((sp, i) => (
             <line key={i} x1={sx} y1={sy} x2={sp.x} y2={sp.y} stroke="var(--grid)" strokeWidth="1"></line>
           ))}
         </g>
 
-        {/* LD2450 FoV wedge */}
+        {/* LD2450 FoV wedge, with edge rays so the coverage boundary reads clearly */}
         {showLd && (
           <g>
-            {!isCeil && <polygon points={ldCone} fill="var(--greenSoft)" opacity="0.5"></polygon>}
-            {isCeil && <circle cx={sx} cy={sy} r={ldDiscR} fill="var(--greenSoft)" opacity="0.45"></circle>}
+            {!isCeil && (
+              <g>
+                <polygon points={ldCone} fill="var(--greenSoft)" opacity="0.6"></polygon>
+                <line x1={sx} y1={sy} x2={ldEdgeL.x} y2={ldEdgeL.y} stroke="var(--green)" strokeWidth="1.2" opacity="0.35"></line>
+                <line x1={sx} y1={sy} x2={ldEdgeR.x} y2={ldEdgeR.y} stroke="var(--green)" strokeWidth="1.2" opacity="0.35"></line>
+              </g>
+            )}
+            {isCeil && (
+              <g>
+                <circle cx={sx} cy={sy} r={ldDiscR} fill="var(--greenSoft)" opacity="0.55"></circle>
+                <circle cx={sx} cy={sy} r={ldDiscR} fill="none" stroke="var(--green)" strokeWidth="1.2" opacity="0.3"></circle>
+              </g>
+            )}
           </g>
         )}
 
@@ -237,32 +305,22 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
             </text>
             {senSelected && (
               <g>
-                <circle
-                  cx={bandHandleIn.x}
-                  cy={bandHandleIn.y}
-                  r="6.5"
-                  fill="var(--panel)"
-                  stroke="var(--bandLine)"
-                  strokeWidth="2"
-                  onPointerDown={(e) => {
-                    e.stopPropagation()
-                    store.beginRadius('minR')
-                  }}
-                  style={{ cursor: 'ns-resize' }}
-                ></circle>
-                <circle
-                  cx={bandHandleOut.x}
-                  cy={bandHandleOut.y}
-                  r="6.5"
-                  fill="var(--panel)"
-                  stroke="var(--bandLine)"
-                  strokeWidth="2"
-                  onPointerDown={(e) => {
-                    e.stopPropagation()
-                    store.beginRadius('maxR')
-                  }}
-                  style={{ cursor: 'ns-resize' }}
-                ></circle>
+                {[
+                  { p: bandHandleIn, which: 'minR' as const },
+                  { p: bandHandleOut, which: 'maxR' as const },
+                ].map(({ p, which }) => (
+                  <g
+                    key={which}
+                    onPointerDown={(e) => {
+                      e.stopPropagation()
+                      store.beginRadius(which)
+                    }}
+                    style={{ cursor: 'ns-resize' }}
+                  >
+                    <circle cx={p.x} cy={p.y} r={bandHandleHitR} fill="transparent"></circle>
+                    <circle cx={p.x} cy={p.y} r={bandHandleR} fill="var(--panel)" stroke="var(--bandLine)" strokeWidth="2.2"></circle>
+                  </g>
+                ))}
               </g>
             )}
           </g>
@@ -278,9 +336,16 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
               const minx = Math.min(...ppx.map((p) => p.x))
               const miny = Math.min(...ppx.map((p) => p.y))
               const selected = z.id === selId
+              const hovered = z.id === s.hoverZoneId && !selected
               const isExcl = z.type === 'exclusion'
               const cnt = occ[z.id] || 0
               const occupied = occupancy.zones[z.id] ?? false
+              const status = isExcl ? (occupied ? 'masked · target inside' : 'masked') : occupied ? `occupied · ${cnt} of 3` : `${cnt} of 3`
+              // The name sits on a small accent chip so it stays readable over
+              // the zone fill, the reference layer and the live target trails.
+              const chipFont = fs(10.5)
+              const chipH = fs(18)
+              const chipW = z.name.length * fs(6.4) + fs(13)
               // rotate handle (rect only)
               let rot = null as null | { x1: number; y1: number; x2: number; y2: number }
               if (selected && z.shape === 'rect') {
@@ -294,13 +359,28 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
               return (
                 <g
                   key={z.id}
+                  // With a draw tool active the zone lets the pointer through, so
+                  // "drag on the canvas to draw" holds anywhere; the crosshair
+                  // signals it. Select tool: the move cursor invites a drag.
                   onPointerDown={(e) => {
+                    if (s.tool !== 'select') return
                     e.stopPropagation()
                     store.beginMoveZone(z.id, atM(e))
                   }}
-                  style={{ cursor: 'move' }}
+                  onPointerEnter={() => store.hoverZone(z.id)}
+                  onPointerLeave={() => store.hoverZone(null)}
+                  style={{ cursor: s.tool === 'select' ? 'move' : 'crosshair' }}
                 >
-                  <polygon points={pts} fill={m.soft} stroke={m.accent} strokeWidth={selected ? 2.4 : 1.8} strokeDasharray={isExcl ? '7 5' : '0'}></polygon>
+                  {/* selection glow: an unmistakable outer halo under the outline */}
+                  {selected && <polygon points={pts} fill="none" stroke={m.accent} strokeWidth="9" opacity="0.22" strokeLinejoin="round"></polygon>}
+                  <polygon
+                    points={pts}
+                    fill={m.soft}
+                    stroke={m.accent}
+                    strokeWidth={selected ? 3 : hovered ? 2.6 : 1.8}
+                    strokeDasharray={isExcl ? '7 5' : '0'}
+                  ></polygon>
+                  {hovered && <polygon points={pts} fill={m.accent} opacity="0.07" style={{ pointerEvents: 'none' }}></polygon>}
                   {isExcl && <polygon points={pts} fill="url(#hatch)"></polygon>}
                   {/* Live occupancy: light the zone the moment a target enters it. */}
                   {occupied && (
@@ -309,64 +389,71 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
                       <polygon points={pts} fill="none" stroke={m.accent} strokeWidth="3.4" opacity="0.45"></polygon>
                     </g>
                   )}
-                  <text
-                    className="zs-svglabel zs-svglabel--ui"
-                    x={minx + fs(8)}
-                    y={miny + fs(15)}
-                    fill={m.accent}
-                    fontSize={fs(11.5)}
-                    fontWeight="600"
-                    strokeWidth={halo}
-                  >
-                    {z.name}
-                  </text>
-                  <text
-                    className="zs-svglabel"
-                    x={minx + fs(8)}
-                    y={miny + fs(27)}
-                    fill={m.accent}
-                    fontSize={fs(9.5)}
-                    opacity="0.85"
-                    strokeWidth={halo}
-                  >
-                    {isExcl ? (occupied ? 'masked · occupied' : 'masked') : occupied ? 'occupied · ' + cnt + ' / 3' : cnt + ' / 3'}
-                  </text>
+                  <g style={{ pointerEvents: 'none' }}>
+                    <rect x={minx + fs(6)} y={miny + fs(6)} width={chipW} height={chipH} rx={fs(4)} fill={m.accent}></rect>
+                    <text
+                      className="zs-svglabel zs-svglabel--ui"
+                      x={minx + fs(6) + chipW / 2}
+                      y={miny + fs(6) + chipH / 2 + chipFont * 0.36}
+                      textAnchor="middle"
+                      fill="var(--on-accent)"
+                      fontSize={chipFont}
+                      fontWeight="700"
+                      strokeWidth={0}
+                    >
+                      {z.name}
+                    </text>
+                    <text
+                      className="zs-svglabel"
+                      x={minx + fs(7)}
+                      y={miny + fs(6) + chipH + fs(12)}
+                      fill={occupied ? m.accent : 'var(--mut)'}
+                      fontSize={fs(10)}
+                      fontWeight={occupied ? 700 : 500}
+                      strokeWidth={halo}
+                    >
+                      {status}
+                    </text>
+                  </g>
                   {selected && (
                     <g>
                       {ppx.map((p, i) => (
-                        <rect
+                        <g
                           key={i}
-                          x={p.x - 4}
-                          y={p.y - 4}
-                          width="8"
-                          height="8"
-                          fill="var(--panel)"
-                          stroke="var(--green)"
-                          strokeWidth="1.5"
                           onPointerDown={(e) => {
                             e.stopPropagation()
                             if (z.shape === 'poly') store.beginVertex(z.id, i)
                             else store.beginCornerResize(z.id, i)
                           }}
-                          style={{ cursor: z.shape === 'poly' ? 'move' : 'nwse-resize' }}
-                        ></rect>
+                          style={{ cursor: z.shape === 'poly' ? 'move' : i % 2 === 0 ? 'nwse-resize' : 'nesw-resize' }}
+                        >
+                          <rect x={p.x - handleHit / 2} y={p.y - handleHit / 2} width={handleHit} height={handleHit} fill="transparent"></rect>
+                          <rect
+                            x={p.x - handleSize / 2}
+                            y={p.y - handleSize / 2}
+                            width={handleSize}
+                            height={handleSize}
+                            rx={fs(2)}
+                            fill="var(--panel)"
+                            stroke={m.accent}
+                            strokeWidth="2"
+                          ></rect>
+                        </g>
                       ))}
                       {rot && (
                         <g>
-                          <line x1={rot.x1} y1={rot.y1} x2={rot.x2} y2={rot.y2} stroke="var(--green)" strokeWidth="1.3"></line>
-                          <circle
-                            cx={rot.x2}
-                            cy={rot.y2}
-                            r="6"
-                            fill="var(--panel)"
-                            stroke="var(--green)"
-                            strokeWidth="1.7"
+                          <line x1={rot.x1} y1={rot.y1} x2={rot.x2} y2={rot.y2} stroke={m.accent} strokeWidth="1.6"></line>
+                          <g
+                            className="zs-handle-rotate"
                             onPointerDown={(e) => {
                               e.stopPropagation()
                               store.beginRotate(z.id)
                             }}
-                            style={{ cursor: 'grab' }}
-                          ></circle>
+                          >
+                            <circle cx={rot.x2} cy={rot.y2} r={bandHandleHitR} fill="transparent"></circle>
+                            <circle cx={rot.x2} cy={rot.y2} r={bandHandleR} fill="var(--panel)" stroke={m.accent} strokeWidth="2"></circle>
+                            <circle cx={rot.x2} cy={rot.y2} r={fs(2.2)} fill={m.accent}></circle>
+                          </g>
                         </g>
                       )}
                     </g>
@@ -377,12 +464,28 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
           </g>
         )}
 
+        {/* rubber band while dragging out a new rectangle */}
+        {creating && (
+          <g style={{ pointerEvents: 'none' }}>
+            <rect
+              x={Math.min(creating.a.x, creating.b.x)}
+              y={Math.min(creating.a.y, creating.b.y)}
+              width={Math.abs(creating.b.x - creating.a.x)}
+              height={Math.abs(creating.b.y - creating.a.y)}
+              fill="var(--greenSoft)"
+              stroke="var(--green)"
+              strokeWidth="1.8"
+              strokeDasharray="5 4"
+            ></rect>
+          </g>
+        )}
+
         {/* draft polygon */}
         {s.draft && s.draft.pts.length > 0 && (
           <g>
             <polyline points={draftLine} fill="var(--greenSoft)" stroke="var(--green)" strokeWidth="1.6" strokeDasharray="5 4"></polyline>
             {draftDots.map((d, i) => (
-              <circle key={i} cx={d.x} cy={d.y} r="4.5" fill="var(--panel)" stroke="var(--green)" strokeWidth="1.8"></circle>
+              <circle key={i} cx={d.x} cy={d.y} r={fs(5)} fill="var(--panel)" stroke="var(--green)" strokeWidth="1.8"></circle>
             ))}
           </g>
         )}
@@ -395,15 +498,16 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
               const trail = t.trail.map((pt) => { const q = toPx(pt.x, pt.y); return `${q.x},${q.y}` }).join(' ')
               return (
                 <g key={t.id}>
-                  <polyline points={trail} fill="none" stroke={t.color} strokeWidth="2.2" strokeLinecap="round" opacity="0.28"></polyline>
-                  <circle cx={p.x} cy={p.y} r="11" fill={t.color} opacity="0.14"></circle>
-                  <circle cx={p.x} cy={p.y} r="4.5" fill={t.color} stroke="var(--canvas)" strokeWidth="1.4"></circle>
+                  <polyline points={trail} fill="none" stroke={t.color} strokeWidth="2.2" strokeLinecap="round" opacity="0.32"></polyline>
+                  <circle cx={p.x} cy={p.y} r="11" fill={t.color} opacity="0.16"></circle>
+                  <circle cx={p.x} cy={p.y} r="4.5" fill={t.color} stroke="var(--canvas)" strokeWidth="1.8"></circle>
                   <text
                     className="zs-svglabel"
                     x={p.x + fs(8)}
                     y={p.y - fs(8)}
                     fill={t.color}
-                    fontSize={fs(9.5)}
+                    fontSize={fs(10)}
+                    fontWeight="700"
                     strokeWidth={halo}
                   >
                     {'T' + (i + 1)}
@@ -425,18 +529,19 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
         >
           {!isCeil && (
             <g>
-              <line x1={sx} y1={sy} x2={sx} y2={boreY} stroke="var(--mut)" strokeWidth="1.3" strokeDasharray="4 4" opacity="0.7"></line>
-              {/* The boresight label sits right of the line end; the ring labels sit
+              <line x1={sx} y1={sy} x2={sx} y2={boreY} stroke="var(--mut)" strokeWidth="1.3" strokeDasharray="4 4" opacity="0.8"></line>
+              {/* The 0° label sits right of the line end; the ring labels sit
                   left of the line, so the two never collide. */}
               <text
                 className="zs-svglabel"
                 x={sx + fs(7)}
                 y={boreY - fs(5)}
-                fill="var(--faint)"
-                fontSize={fs(9.5)}
+                fill="var(--mut)"
+                fontSize={fs(10)}
+                fontWeight="600"
                 strokeWidth={halo}
               >
-                0° boresight
+                0° · straight ahead
               </text>
               <rect
                 x={sx - fs(24)}
@@ -464,9 +569,9 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
           )}
           {isCeil && (
             <g>
-              <circle cx={sx} cy={sy} r="16" fill="none" stroke="var(--mut)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6"></circle>
-              <text className="zs-svglabel" x={sx} y={sy - fs(22)} textAnchor="middle" fill="var(--faint)" fontSize={fs(9.5)} strokeWidth={halo}>
-                ↓ nadir
+              <circle cx={sx} cy={sy} r="16" fill="none" stroke="var(--mut)" strokeWidth="1" strokeDasharray="3 3" opacity="0.7"></circle>
+              <text className="zs-svglabel" x={sx} y={sy - fs(22)} textAnchor="middle" fill="var(--mut)" fontSize={fs(10)} fontWeight="600" strokeWidth={halo}>
+                ↓ looking down
               </text>
             </g>
           )}
@@ -483,10 +588,40 @@ function CanvasScene(props: { s: EditorState; w: number; h: number; ts: number; 
             fontWeight="600"
             strokeWidth={halo}
           >
-            {isCeil ? 'sensor' : 'origin'}
+            sensor
           </text>
         </g>
+
+        {/* live readout beside the pointer during a drag */}
+        {readout && readoutAt && (
+          <g style={{ pointerEvents: 'none' }}>
+            <rect
+              x={Math.min(readoutAt.x + fs(12), VIEWBOX_W - readout.length * fs(6.4) - fs(16))}
+              y={Math.max(readoutAt.y - fs(34), fs(4))}
+              width={readout.length * fs(6.4) + fs(12)}
+              height={fs(20)}
+              rx={fs(5)}
+              fill="var(--panel)"
+              stroke="var(--bd)"
+              strokeWidth="1"
+            ></rect>
+            <text
+              className="zs-svglabel"
+              x={Math.min(readoutAt.x + fs(12), VIEWBOX_W - readout.length * fs(6.4) - fs(16)) + fs(6)}
+              y={Math.max(readoutAt.y - fs(34), fs(4)) + fs(13.5)}
+              fill="var(--tx)"
+              fontSize={fs(10)}
+              fontWeight="600"
+              strokeWidth={0}
+            >
+              {readout}
+            </text>
+          </g>
+        )}
       </svg>
+
+      {/* First-run guidance floats over the empty canvas and never blocks it. */}
+      {firstRunHint && <div className="zs-canvas-hint">{firstRunHint}</div>}
 
       {/* The HUD owns the bottom-left corner: live cursor coordinates and the
           grid pitch, clear of the toolbar, the inspector and every canvas label. */}
@@ -509,9 +644,10 @@ function CanvasEmptyState() {
       <div className="zs-canvas-empty__icon">📡</div>
       <div className="zs-canvas-empty__title">No radar sensor confirmed</div>
       <div className="zs-canvas-empty__body">
-        This device has not been confirmed as an LD2450 or SEN0609. Open Device on the left to review what was detected,
-        confirm the sensor, correct a role, or dismiss the device if it is not a radar sensor.
+        This device has not been confirmed as an LD2450 or SEN0609. Review what was detected, confirm the sensor,
+        correct a role, or dismiss the device if it is not a radar sensor.
       </div>
+      <span className="zs-btn zs-btn--quiet zs-canvas-empty__cta">Open device mapping</span>
     </div>
   )
 }
