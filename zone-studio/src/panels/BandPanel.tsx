@@ -33,6 +33,8 @@ function BandSlider(props: {
         step={props.step}
         value={props.raw}
         onChange={props.onChange}
+        onPointerUp={() => store.endSliderEdit()}
+        onBlur={() => store.endSliderEdit()}
       />
     </div>
   )

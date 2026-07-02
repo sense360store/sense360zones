@@ -125,6 +125,8 @@ export function ZonePanel(props: { zone: Zone; count: number }) {
                 step="1"
                 value={Math.round(zone.rot)}
                 onChange={(e) => store.patchRect(zone.id, { rot: parseInt(e.target.value) })}
+                onPointerUp={() => store.endSliderEdit()}
+                onBlur={() => store.endSliderEdit()}
               />
             </div>
           </div>

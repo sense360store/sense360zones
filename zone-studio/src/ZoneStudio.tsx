@@ -16,7 +16,7 @@
  * panels slide over the canvas behind the two floating toggles held here.
  * All data state flows through the store and the client.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Canvas } from './canvas/Canvas'
 import { CanvasToolbar } from './canvas/CanvasToolbar'
 import { ConnectionOverlay } from './panels/ConnectionOverlay'
@@ -27,12 +27,33 @@ import { store, useEditorState } from './store/hooks'
 
 type Drawer = 'layers' | 'inspector' | null
 
+/** Text entry keeps its native undo; everything else goes to the edit history. */
+function isTextEntry(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  if (el.isContentEditable || el.tagName === 'TEXTAREA') return true
+  return el instanceof HTMLInputElement && el.type !== 'range'
+}
+
 export default function ZoneStudio() {
   const s = useEditorState()
   // Which side panel is open when the panels are drawers (narrow widths only;
   // at comfortable widths CSS keeps both panels in the flow and ignores this).
   const [drawer, setDrawer] = useState<Drawer>(null)
   const toggle = (which: Drawer) => setDrawer((cur) => (cur === which ? null : which))
+
+  // Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes, app-wide.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || isTextEntry(e.target)) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) store.undo()
+      else if (key === 'z' || key === 'y') store.redo()
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className={'zs ' + (s.theme === 'dark' ? 'dark' : '')}>

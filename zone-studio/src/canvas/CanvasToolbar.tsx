@@ -34,6 +34,25 @@ export function CanvasToolbar() {
       <div className="zs-vdivider"></div>
       <div className="zs-seg">
         <button
+          className="zs-seg__btn"
+          onClick={() => store.undo()}
+          disabled={!s.canUndo}
+          title="Undo (Ctrl+Z / ⌘Z)"
+        >
+          ↶ Undo
+        </button>
+        <button
+          className="zs-seg__btn"
+          onClick={() => store.redo()}
+          disabled={!s.canRedo}
+          title="Redo (Ctrl+Shift+Z / ⌘⇧Z)"
+        >
+          ↷ Redo
+        </button>
+      </div>
+      <div className="zs-vdivider"></div>
+      <div className="zs-seg">
+        <button
           className={'zs-seg__btn' + (s.tool === 'select' ? ' is-on' : '')}
           onClick={() => store.setTool('select')}
           title="Select & move"
