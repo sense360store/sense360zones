@@ -12,15 +12,20 @@ the overflow menu choose Repositories. Add:
 https://github.com/sense360store/sense360zones
 ```
 
-Sense360 Zone Studio then appears in the store. Install it, start it, and open it
-from the sidebar.
+Sense360 Zone Studio then appears in the store. It is an optional add-on: install
+it, start it, and open it from the sidebar when you want to shape radar zones.
 
 ## Sense360 Zone Studio
 
-An interactive radar and sensor zone configuration studio for Sense360 rooms. Lay
-out detection and exclusion zones over a live canvas, tune sensor range bands, and
-watch tracked targets move. It supports the HLK LD2450 (spatial X/Y tracking, owns
-the drawable zones) and the DFRobot SEN0609 / C4001 (radial range band).
+An interactive radar and sensor zone configuration studio for Sense360 rooms with a
+radar sensor. Lay out detection and exclusion zones over a live canvas, tune sensor
+range bands, and watch tracked targets move. It supports the HLK LD2450 (spatial X/Y
+tracking, owns the drawable zones) and the DFRobot SEN0609 / C4001 (radial range
+band).
+
+Zone Studio is optional. It is an advanced tool for shaping radar zones, not a setup
+step: a Sense360 device's own Home Assistant entities come from its firmware and do
+not depend on this add-on.
 
 The backend connects to Home Assistant. It discovers ESPHome devices and
 entities, maps them to the room, device, and sensor model, and streams live
