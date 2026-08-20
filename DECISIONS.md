@@ -54,7 +54,7 @@ at generation time, since the external component prefers convex zones. (Phase 4.
 the off-the-shelf `dfrobot_sen0395` component actually exposes (presence on/off,
 basic range) and grey out the rest. A dedicated/extended `c4001` component
 covering distance, configurable min/max range, and trigger/sustain sensitivity is
-**Phase 5**, so it does not block the LD2450 path which is the core of the product.
+**Phase 5**, so it does not block the LD2450 path which is the core of this add-on.
 
 *Note:* the band editor as designed (min/max radius, beam, trigger, sustained,
 reduced range) is already in the data model (`BandConfig`) and UI, but its full

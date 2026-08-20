@@ -3,6 +3,14 @@
 Configure radar detection and exclusion zones over a live canvas for HLK LD2450
 and DFRobot SEN0609 sensors, from the Home Assistant sidebar.
 
+## Zone Studio is optional
+
+Zone Studio is an advanced tool for shaping radar zones, not a setup step. A
+Sense360 device's own Home Assistant entities come from its firmware and do not
+depend on this add-on: they are there whether or not it is installed, and nothing
+here has to be configured before a room works. Install Zone Studio when you have a
+radar sensor whose zones you want to shape.
+
 ## What this add-on does
 
 Zone Studio opens through Home Assistant ingress, so it is reachable from the
@@ -86,11 +94,13 @@ than filtering in hardware.
 
 Second, it evaluates your zones against the live target stream in software and
 publishes occupancy to Home Assistant over MQTT. Each zone becomes an occupancy
-binary sensor, and the device gets a presence binary sensor. A target is counted
-for presence when it is inside any detection zone, or anywhere in range when there
-are no detection zones, and never when it is inside an exclusion zone, so exclusion
-zones subtract from presence. Transitions are debounced with a small on and off
-delay so a brief flicker at a zone edge does not toggle an entity.
+binary sensor, and the device gets a presence binary sensor. These are additional
+entities published by the add-on, alongside the ones the device's own firmware
+already provides, not replacements for them. A target is counted for presence when
+it is inside any detection zone, or anywhere in range when there are no detection
+zones, and never when it is inside an exclusion zone, so exclusion zones subtract
+from presence. Transitions are debounced with a small on and off delay so a brief
+flicker at a zone edge does not toggle an entity.
 
 This is instant and needs no flashing. The canvas lights a zone the moment a target
 enters it, using the same evaluation that drives the published entities.
